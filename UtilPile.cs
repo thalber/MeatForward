@@ -1,4 +1,5 @@
-﻿using System;
+﻿using Discord;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text;
@@ -14,5 +15,24 @@ namespace MeatForward
             foreach (var cat in ch.Guild.CategoryChannels) if (cat.Channels.Contains(ch)) return cat.Id;
             return null;
         }
+    }
+
+    internal class MeatActivity : IActivity
+    {
+        internal MeatActivity()
+        {
+
+        }
+
+        public string aname;
+        public string desc;
+        public ActivityType atype = ActivityType.Watching;
+        public string Name => aname;
+
+        public ActivityType Type => ActivityType.Watching;
+
+        public ActivityProperties Flags => ActivityProperties.None;
+
+        public string Details => desc;
     }
 }

@@ -10,7 +10,6 @@ namespace MeatForward
     {
         private const string tokenKey = "MeatForward_TOKEN";
         private static DiscordSocketClient _client;
-        //private static InteractionService _is;
         private static SnapshotData _cSnap;
         private static SemaphoreSlim exitMark = new(0, 1);
         private static string _csnapJson 
@@ -78,6 +77,8 @@ namespace MeatForward
             SocketGuild guild;
             SocketGuild[] allguilds = _client.Guilds.ToArray();
 
+            await _client.SetActivityAsync(new MeatActivity() { aname = "the pink mist pass by", desc = "" });
+
             Console.WriteLine();
             Console.WriteLine($"Current snapshot: {_cSnap}");
             var r = cPrompt("Select needed action: ",
@@ -89,7 +90,22 @@ namespace MeatForward
                 case "snapshot":
                     {
                         SnapshotMode mode;
-                        guild = cPrompt("Choose guild", allguilds.ToArray(), true);
+                        try
+                        {
+                            guild = cPrompt("Choose guild", allguilds.ToArray(), true);
+                        }
+                        catch (ArgumentException)
+                        {
+                            Console.WriteLine("No guilds available!");
+                            break;
+                        }
+                        
+                        await _client.SetActivityAsync(new MeatActivity()
+                        {
+                            atype = ActivityType.Listening,
+                            aname = "to the pulse closely",
+                            desc = guild.Name
+                        });
                         mode = cPromptFlags<SnapshotMode>("Set snapshot mode");
                         Console.WriteLine(mode);
                         //guild = allguilds.First(g => g.Name == gSelect);
@@ -185,7 +201,14 @@ namespace MeatForward
                         if (_cSnap is null) { Console.WriteLine("No snapshot for rollback!"); goto endRollback; }
                         Console.WriteLine($"Current snapshot is for guild: {_cSnap.guildID}.");
                         guild = allguilds.FirstOrDefault(g => g.Id == _cSnap.guildID);
-                        if (guild is null) { Console.WriteLine("Not in target guild! aborting"); goto endRollback; }
+                        if (guild is null) { Console.WriteLine("Not in target guild! aborting"); break; }
+
+                        await _client.SetActivityAsync(new MeatActivity()
+                        {
+                            atype = ActivityType.Playing,
+                            aname = "with veins",
+                            desc = ""
+                        });
                         var md = _cSnap.smode;
                         var mReason = $"Automated rollback to snapshot {_cSnap.creationDate}";
                         RequestOptions rqParams = new() { AuditLogReason = mReason, RetryMode = RetryMode.AlwaysRetry };
@@ -237,8 +260,8 @@ namespace MeatForward
                         roleRecreateTasks.Clear();
                         //roleRestoreTasks.Clear();
 
-                        RestCategoryChannel plain = default;
-                        IChannel plainCastTest = plain;
+                        //RestCategoryChannel plain = default;
+                        //IChannel plainCastTest = plain;
 
                         //Task<Discord.Rest.RestTextChannel> generic = default;
                         //Task<IChannel> genericCastTest = generic;
@@ -416,7 +439,7 @@ namespace MeatForward
                         try
                         {
                             var tpath = cPromptAny("input filename: >");
-                            File.WriteAllText(cPromptAny("input filename: >"), _csnapJson);
+                            File.WriteAllText(tpath, _csnapJson);
                         }
                         catch (Exception e) { Console.WriteLine(e); }
                         break;

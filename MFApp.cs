@@ -330,7 +330,7 @@ namespace MeatForward
                                 Console.WriteLine($"Failed to recreate channel: {e}");
                             }
                         }
-                        List<Task> rolePermRestoreTasks = new();
+                        List<(Task, IRole)> rolePermRestoreTasks = new();
 
                         setRolePerms:
                         bool roleSelected(ulong r) 
@@ -342,9 +342,9 @@ namespace MeatForward
 
                         foreach (var role in guild.Roles)
                         {
-                            if (roleSelected(role.Id)) rolePermRestoreTasks.Add( role.ModifyAsync(rp => { 
+                            if (roleSelected(role.Id)) rolePermRestoreTasks.Add((role.ModifyAsync(rp => { 
                                 rp.Permissions = new(new(_cSnap.roleData[role.Id].perms)); },
-                                options:rqParams));
+                                options:rqParams), role));
                             else if (nullify)
                             {
                                 rolePermRestoreTasks.Add(role.ModifyAsync(rp => 

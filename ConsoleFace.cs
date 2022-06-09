@@ -62,10 +62,10 @@ namespace MeatForward
             goto takeAnswer;
         }
         
-        internal static string cPromptAny(string msg = null)
+        internal static string cPromptAny(string? msg = null)
         {
             if (msg is not null) Console.Write(msg);
-            return Console.ReadLine();
+            return Console.ReadLine() ?? string.Empty;
         }
     }
 }

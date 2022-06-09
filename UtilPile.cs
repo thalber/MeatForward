@@ -15,6 +15,18 @@ namespace MeatForward
             foreach (var cat in ch.Guild.CategoryChannels) if (cat.Channels.Contains(ch)) return cat.Id;
             return null;
         }
+
+        //internal static Dictionary<string, int> OrdinalsByNames(this Microsoft.Data.Sqlite.SqliteDataReader r)
+        //{
+        //    Dictionary<string, int> dict = new(); //Dictionary<string, int>();
+        //    System.Data.DataTable schema = r.GetSchemaTable();
+        //    foreach (var row in schema.Rows)
+        //    {
+        //        var actual = (System.Data.DataRow)row;
+        //        dict.Add((string)actual["ColumnName"], (int)actual["Ordinal"]);
+        //    }
+        //    return dict;
+        //}
     }
 
     internal class MeatActivity : IActivity
@@ -28,11 +40,8 @@ namespace MeatForward
         public string desc;
         public ActivityType atype = ActivityType.Watching;
         public string Name => aname;
-
-        public ActivityType Type => ActivityType.Watching;
-
+        public ActivityType Type => atype;
         public ActivityProperties Flags => ActivityProperties.None;
-
         public string Details => desc;
     }
 }

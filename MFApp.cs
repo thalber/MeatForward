@@ -146,11 +146,12 @@ namespace MeatForward
                             _cSnap.SetChannelData(channel.Id, new(channel.Name, channel.GetChannelType(), channel.getCatID(), (channel as ITextChannel)?.Topic, channel.PermissionOverwrites.ToArray()));
                         }
                     }
-                    //todo: users                    
+                    //todo: users
+                    _cSnap.props.creationDate = DateTime.UtcNow;
                     break;
                 case "rollback":
                     {
-
+                        //foreach (var )
                     }
                     break;
                 case "open":

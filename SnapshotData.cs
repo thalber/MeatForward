@@ -80,7 +80,7 @@ namespace MeatForward
                 this.guildID = guildID;
             }
         }
-        public struct channelVanityData
+        public struct channelVanityData : IAmDataRow<channelVanityData>, IEquatable<channelVanityData>
         {
             public string name;
             public Discord.ChannelType? type;
@@ -98,8 +98,47 @@ namespace MeatForward
                 this.topic = topic;
                 this.permOverwrites = overwrites;
             }
+
+            public bool Equals(channelVanityData other)
+            {
+                bool owMatch = true;
+                foreach (var ow in this.permOverwrites)
+                {
+                    owMatch &= other.permOverwrites.Any(opo 
+                        => opo.Permissions.AllowValue == ow.Permissions.AllowValue
+                        && opo.Permissions.DenyValue == ow.Permissions.DenyValue
+                        && opo.TargetType == ow.TargetType
+                        && opo.TargetId == ow.TargetId);
+                }
+                return this.name == other.name
+                    && this.type == other.type
+                    && this.categoryId == other.categoryId
+                    && this.topic == other.topic
+                    && owMatch;
+            }
+
+            public channelVanityData fillFromCurrentRow(SqliteDataReader r)
+            {
+                this.type = (Discord.ChannelType?)r.GetInt32(r.GetOrdinal("TYPE"));
+                this.name = r.GetString(r.GetOrdinal("NAME"));
+                this.categoryId = (ulong?)r.GetInt64(r.GetOrdinal("CATID"));
+                this.topic = r.GetString(r.GetOrdinal("TOPIC"));
+                return this;
+            }
+
+            public Dictionary<string, (bool danger, object val)> postValues()
+            {
+                Dictionary<string, (bool danger, object val)> res = new()
+                {
+                    { "NAME", (true, name) },
+                    { "TYPE", (false, (int)(type ?? Discord.ChannelType.Text)) },
+                    { "CATID", (false, categoryId ?? (object)"NULL") },
+                    { "TOPIC", (true, topic ?? "NULL") },
+                };
+                return res;
+            }
         }
-        public struct roleVanityData
+        public struct roleVanityData : IAmDataRow<roleVanityData>, IEquatable<roleVanityData>
         {
             public Discord.Color? col;
             public bool hoist;
@@ -114,6 +153,37 @@ namespace MeatForward
                 this.ment = ment;
                 this.perms = perms;
                 this.name = name;
+            }
+
+            public bool Equals(roleVanityData other)
+            {
+                return this.col?.RawValue == other.col?.RawValue 
+                    && this.hoist == other.hoist 
+                    && this.ment == other.ment 
+                    && this.perms == other.perms 
+                    && this.name == other.name;
+            }
+
+            public roleVanityData fillFromCurrentRow(SqliteDataReader r)
+            {
+                col = new Discord.Color((uint)r.GetInt32(r.GetOrdinal("COLOR")));
+                hoist = (int)r["HOIST"] == 1;
+                ment = (int)r["MENT"] == 1;
+                perms = (ulong)r.GetInt64(r.GetOrdinal("PERMS"));
+                name = r.GetString(r.GetOrdinal("NAME"));
+                return this;
+            }
+            public Dictionary<string, (bool danger, object val)> postValues()
+            {
+                Dictionary<string, (bool danger, object val)> res = new()
+                {
+                    { "COLOR", (false, col?.RawValue ?? 0) },
+                    { "HOIST", (false, hoist ? 1 : 0) },
+                    { "MENT", (false, ment ? 1 : 0) },
+                    { "PERMS", (false, (long)perms) },
+                    { "NAME", (true, name) }
+                };
+                return res;
             }
         }
         

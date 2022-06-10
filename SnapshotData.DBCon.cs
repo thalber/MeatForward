@@ -10,6 +10,7 @@ namespace MeatForward
 
     //#error figure out if nullables work right (please god i hope they work right)
 #warning readd filtering
+#warning inefficient use of IO, revise
     internal partial class SnapshotData
     {
         //id (int) : nativeid(int) : name (text) : color (int) : hoist (bool) : ment (bool)
@@ -176,18 +177,22 @@ namespace MeatForward
         /// <returns>resulting internal ID, null if failure</returns>
         public int? SetChannelData(ulong nativeid, channelVanityData ch)
         {
-            SqliteDataReader? r = default;
+            SqliteDataReader? r = default, r0 = default;
             SqliteCommand cmd0 = DB.CreateCommand(), cmd1 = DB.CreateCommand();
             cmd0.CommandText = $"SELECT * FROM {DB_Channels} WHERE NATIVEID={nativeid}";
             int? res = default;
             bool alreadyKnown;
+            channelVanityData chTest = default;
             Console.WriteLine($"Attempting to add channel record for {ch.name} ({nativeid}...)");
-
-
 
             try
             {
                 refreshRes();
+                if (alreadyKnown)
+                {
+                    r0 = cmd0.ExecuteReader(System.Data.CommandBehavior.SingleResult);
+                    chTest = new channelVanityData().fillFromCurrentRow(r0);
+                }
 
                 cmd1.CommandText = alreadyKnown
                     //update existing record
@@ -210,7 +215,7 @@ namespace MeatForward
                 //cmd1.Parameters.AddWithValue("$catid", ch.categoryId);
                 //cmd1.Parameters.AddWithValue("$ntid", nativeid);
 
-                int c = cmd1.ExecuteNonQuery();
+                if (!chTest.Equals(ch)) cmd1.ExecuteNonQuery();
 
                 refreshRes();
                 Console.WriteLine($"Added channel record, recording overwrites");
@@ -227,6 +232,7 @@ namespace MeatForward
             finally
             {
                 if (!(r?.IsClosed ?? true)) r?.Close();
+                r0?.Close();
             }
 
             return res;
@@ -329,7 +335,7 @@ namespace MeatForward
                 cmd0.CommandText = alreadyKnown
                     //update existing record
                     ? $"UPDATE {DB_Roles} " +
-                    $" SET COLOR={rl.col?.RawValue ?? 0}, " +
+                    $"SET COLOR={rl.col?.RawValue ?? 0}, " +
                     $"HOIST = {(rl.hoist ? 1 : 0)}, " +
                     $"MENT = {(rl.ment ? 1 : 0)}, " +
                     $"NAME=$rname, " +
@@ -410,8 +416,29 @@ namespace MeatForward
             return res;
         }
 
-        #region binds
+        #region dispense
         
+        public IEnumerator<roleVanityData> getAllRoleData()
+        {
+            SqliteDataReader r = default;
+            SqliteCommand cmd0 = DB.CreateCommand();
+            cmd0.CommandText = $"SELECT * FROM {DB_Roles};";
+            r = cmd0.ExecuteReader();
+
+            try
+            {
+                if (!r.HasRows) goto done;
+                while (r.Read())
+                {
+                    yield return new roleVanityData().fillFromCurrentRow(r);
+                }
+            }
+            finally
+            {
+                r?.Close();
+            }
+            done: yield break;
+        }
 
         #endregion
 

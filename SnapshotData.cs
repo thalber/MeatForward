@@ -194,6 +194,7 @@ namespace MeatForward
             /// ONLY right when fillFromCurrentRow!!!
             /// </summary>
             public int internalId = default;
+
             public roleStoreData(ulong nativeid, Discord.Color? col, bool sep, bool ment, ulong perms, string name)
             {
                 this.col = col;

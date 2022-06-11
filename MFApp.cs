@@ -309,18 +309,19 @@ namespace MeatForward
 
                     restoreChannelPerms:
                         List<(channelStoreData record, Task t)> restoreChannelPermTasks = new();
-
+                        Func<Overwrite, object> gh = xx => (xx.TargetId, xx.TargetType, xx.Permissions.AllowValue, xx.Permissions.DenyValue);
                         foreach (var record in _cSnap.getAllChannelData())
                         {
                             var channel = guild.Channels.FirstOrDefault(rl => rl.Id == record.nativeid);
                             if (channel is null) continue;
                             if (!channel.getStoreData().Equals(record))
                             {
-                                Console.WriteLine($"Overwrites dont match! updating {Newtonsoft.Json.JsonConvert.SerializeObject(record)}");
+                                Console.WriteLine($"Overwrites dont match! updating {Newtonsoft.Json.JsonConvert.SerializeObject(record.permOverwrites.Select(gh))}");
                                 restoreChannelPermTasks.Add((record, channel.ModifyAsync(ch =>
                                 {
-                                    Console.WriteLine($"SCROM : {record.name}, {Newtonsoft.Json.JsonConvert.SerializeObject(record.permOverwrites)}");
                                     ch.PermissionOverwrites = new Optional<IEnumerable<Overwrite>>(record.permOverwrites);
+                                    
+                                    Console.WriteLine($"SCROM : {record.name}, {Newtonsoft.Json.JsonConvert.SerializeObject(ch.PermissionOverwrites.Value.Select(gh))}");
                                 },
                                 rqp)));
                             }

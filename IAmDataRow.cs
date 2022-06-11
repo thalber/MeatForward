@@ -8,9 +8,7 @@ namespace MeatForward
 {
     public interface IAmDataRow<TSelf> where TSelf : IAmDataRow<TSelf>
     {
-
         public TSelf fillFromCurrentRow(Microsoft.Data.Sqlite.SqliteDataReader r);
-
         public Dictionary<string, (bool danger, object val)> postValues();
     }
 }

@@ -15,6 +15,26 @@ namespace MeatForward
             foreach (var cat in ch.Guild.CategoryChannels) if (cat.Channels.Contains(ch)) return cat.Id;
             return null;
         }
+        internal static SnapshotData.channelStoreData getStoreData(this Discord.WebSocket.SocketGuildChannel channel, Overwrite[] ows = null)
+        {
+            SnapshotData.channelStoreData data = new(channel.Id,
+                channel.Name,
+                channel.GetChannelType(),
+                channel.getCatID(),
+                (channel as ITextChannel)?.Topic,
+                (channel as ITextChannel)?.IsNsfw ?? false,
+                (channel as ITextChannel)?.SlowModeInterval,
+                channel.Position,
+                channel.PermissionOverwrites.ToArray() ?? ows);
+            return data;
+        }
+
+        internal static SnapshotData.roleStoreData getStoreData(this Discord.WebSocket.SocketRole role)
+        {
+            SnapshotData.roleStoreData res = new(role.Id, role.Color, role.IsHoisted, role.IsMentionable, role.Permissions.RawValue, role.Name);
+
+            return res;
+        }
 
         //internal static Dictionary<string, int> OrdinalsByNames(this Microsoft.Data.Sqlite.SqliteDataReader r)
         //{

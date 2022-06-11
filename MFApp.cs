@@ -3,6 +3,7 @@ using Discord;
 using Discord.Rest;
 
 using static MeatForward.ConsoleFace;
+using static MeatForward.SnapshotData;
 
 namespace MeatForward
 {
@@ -130,8 +131,8 @@ namespace MeatForward
                             Console.WriteLine("no snapshot to capture to!");
                             break;
                         }
-                        guild = allguilds.FirstOrDefault(g => g.Id == _cSnap.props.guildID);
-                        if (guild == null)
+                        guild = _client.GetGuild(_cSnap.props.guildID);
+                        if (guild is null)
                         {
                             Console.WriteLine("Not in target guild!");
                             break;
@@ -139,11 +140,11 @@ namespace MeatForward
 
                         foreach (var role in guild.Roles)
                         {
-                            _cSnap.SetRoleData(role.Id, new(role.Color, role.IsHoisted, role.IsMentionable, role.Permissions.RawValue, role.Name));
+                            _cSnap.SetRoleData(role.Id, role.getStoreData());
                         }
                         foreach (var channel in guild.Channels)
                         {
-                            _cSnap.SetChannelData(channel.Id, new(channel.Name, channel.GetChannelType(), channel.getCatID(), (channel as ITextChannel)?.Topic, channel.PermissionOverwrites.ToArray()));
+                            _cSnap.SetChannelData(channel.Id, channel.getStoreData());
                         }
                     }
                     //todo: users
@@ -151,7 +152,190 @@ namespace MeatForward
                     break;
                 case "rollback":
                     {
-                        //foreach (var )
+                        int errc = default;
+                        if (_cSnap is null) { Console.WriteLine("No snapshot open!"); break; }
+                        guild = _client.GetGuild(_cSnap.props.guildID);
+                        if (guild is null) { Console.WriteLine("Not in target guild!"); break; }
+                        RequestOptions rqp = new() { AuditLogReason = $"Automated rollback from {_cSnap}", RetryMode = RetryMode.AlwaysRetry };
+
+                        bool recreateMissingRoles = cPromptBinary("Recreate missing roles?"),
+                            recreateMissingChannels = cPromptBinary("Recreate missing channels?"),
+                            nullify = _cSnap.props.smode.HasFlag(SnapshotMode.ForceNullifyOmitted);
+
+
+                    restoreRoles:
+                        if (!recreateMissingRoles) goto restoreChannels;
+                        Console.WriteLine("! Recreating missing roles...");
+                        List<(roleStoreData record, Task<RestRole> t)> restoreRoleTasks = new();
+                        foreach (var record in _cSnap.getAllRoleData())
+                        {
+                            if (!guild.Roles.Any(r => r.Id == record.nativeid))
+                            {
+                                Console.WriteLine($"Role {Newtonsoft.Json.JsonConvert.SerializeObject(record)} not found. Queueing up recreation");
+                                restoreRoleTasks.Add(
+                                    (record, 
+                                    guild.CreateRoleAsync (record.name,
+                                    new(record.perms),
+                                    record.col,
+                                    record.hoist,
+                                    record.ment,
+                                    rqp)));
+                            }
+                        }
+
+                        foreach (var rt in restoreRoleTasks)
+                        {
+                            try
+                            {
+                                var rl = await rt.t;
+                                _cSnap.updateEntityNativeID(DB_Roles,
+                                rt.record.internalId, rl.Id);
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"Error restoring role! {ex}");
+                                errc++;
+                            }
+                        }
+                        Console.WriteLine($"Role restoration tasks ran: {restoreRoleTasks.Count}, errors: {errc}");
+                        errc = 0;
+                        restoreRoleTasks.Clear();
+
+                    restoreChannels:
+                        if (!recreateMissingChannels) goto restoreRolePerms;
+                        //Console.WriteLine("! restoring");
+                        List<(channelStoreData record, Task t)> restoreChannelTasks = new();
+                        Console.WriteLine("! Recreating missing channels...");
+                        foreach (var record in _cSnap.getAllChannelData())
+                        {
+                            if (!guild.Channels.Any(ch => ch.Id == record.nativeid))
+                            {
+                                Console.WriteLine($"Channel {Newtonsoft.Json.JsonConvert.SerializeObject(record)}) not found. Queueing up recreation");
+                                restoreChannelTasks.Add((record,
+                                    record.type switch
+                                    {
+                                        ChannelType.Voice => guild.CreateVoiceChannelAsync(record.name, ch =>
+                                        {
+                                            //ch.PermissionOverwrites = record.permOverwrites;
+                                            ch.CategoryId = record.categoryId;
+                                            ch.Position = record.position is null or 0
+                                            ? new()
+                                            : new(record.position.Value);
+                                        },
+                                        rqp),
+                                        ChannelType.Category => guild.CreateCategoryChannelAsync(record.name, ch =>
+                                        {
+                                            //ch.PermissionOverwrites = record.permOverwrites;
+                                            ch.Position = record.position is null or 0
+                                            ? new() 
+                                            : new(record.position.Value);
+                                        }, 
+                                        rqp),
+                                        ChannelType.Text or _ => guild.CreateTextChannelAsync(record.name, ch =>
+                                        {
+                                            //ch.PermissionOverwrites = record.permOverwrites;
+                                            ch.CategoryId = record.categoryId;
+                                            ch.IsNsfw = record.isNsfw;
+                                            ch.SlowModeInterval = record.slowModeInterval is 0 or null
+                                            ? new()
+                                            : new(record.slowModeInterval.Value);
+                                            ch.Position = record.position is null or 0
+                                            ? new()
+                                            : new(record.position.Value);
+                                        }, 
+                                        rqp)
+                                    }));
+                            }
+                        }
+
+                        foreach (var ct in restoreChannelTasks)
+                        {
+                            try
+                            {
+                                await ct.t;
+                                var ct_text = ct.t as Task<RestTextChannel>;
+                                var ct_voice = ct.t as Task<RestVoiceChannel>;
+                                var ct_cat = ct.t as Task<RestCategoryChannel>;
+                                IChannel? result = ct_text?.Result ?? ct_voice?.Result ?? ct_cat?.Result as IChannel;
+                                if (result is null) {
+                                    Console.WriteLine($"Unexpected null result in channel restore! " +
+                                        $"Skipping {ct.record.name}({ct.record.internalID})");
+                                    continue;
+                                }
+                                _cSnap.updateEntityNativeID(DB_Channels, ct.record.internalID, result.Id);
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"Error recreating channel {ct.record.name} ({ct.record.internalID}): {ex}");
+                                errc++;
+                            }
+                        }
+                        Console.WriteLine($"Ran {restoreChannelTasks.Count} channel restore tasks; errors : {errc}");
+                        errc = 0;
+                        restoreChannelTasks.Clear();
+
+                    restoreRolePerms:;
+                        List<(roleStoreData record, Task t)> restoreRolePermTasks = new();
+                        foreach (var roleRecord in _cSnap.getAllRoleData())
+                        {
+                            var role = guild.Roles.FirstOrDefault(rl => rl.Id == roleRecord.nativeid);
+                            if (role is null) continue;
+                            if (!role.getStoreData().Equals(roleRecord))
+                            {
+                                restoreRolePermTasks.Add((roleRecord,
+                                role.ModifyAsync(rl => {
+                                    rl.Permissions = new GuildPermissions(roleRecord.perms);
+                                    rl.Hoist = roleRecord.hoist;
+                                    rl.Mentionable = roleRecord.ment;
+                                    rl.Color = roleRecord.col ?? Color.Default;
+                                    rl.Name = roleRecord.name;
+                                },
+                            rqp)));
+                            }
+                            
+                        }
+                        foreach (var rpt in restoreRolePermTasks)
+                        {
+                            try
+                            {
+                                await rpt.t;
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"Error restoring role perms for {rpt.record.name} ({rpt.record.nativeid}): {ex}");
+                            }
+                        }
+                        restoreRolePermTasks.Clear();
+
+                    restoreChannelPerms:
+                        List<(channelStoreData record, Task t)> restoreChannelPermTasks = new();
+
+                        foreach (var record in _cSnap.getAllChannelData())
+                        {
+                            var channel = guild.Channels.FirstOrDefault(rl => rl.Id == record.nativeid);
+                            if (channel is null) continue;
+                            if (!channel.getStoreData().Equals(record))
+                            {
+                                Console.WriteLine($"Overwrites dont match! updating {Newtonsoft.Json.JsonConvert.SerializeObject(record)}");
+                                restoreChannelPermTasks.Add((record, channel.ModifyAsync(ch =>
+                                {
+                                    Console.WriteLine($"SCROM : {record.name}, {Newtonsoft.Json.JsonConvert.SerializeObject(record.permOverwrites)}");
+                                    ch.PermissionOverwrites = new Optional<IEnumerable<Overwrite>>(record.permOverwrites);
+                                },
+                                rqp)));
+                            }
+                        }
+                        foreach (var cprt in restoreChannelPermTasks)
+                        {
+                            try
+                            {
+                                await cprt.t;
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"Error restoring permissions for channel {cprt.record.name} ({cprt.record.nativeid} : {ex}");
+                            }
+                        }
                     }
                     break;
                 case "open":
@@ -171,13 +355,17 @@ namespace MeatForward
                     }
                     break;
                 case "close":
+                    _cSnap?.Save();
                     _cSnap = null;
                     break;
                 case "props":
+                    if (_cSnap is null) break;
                     props = new(cPromptAny("Comment: "), _cSnap.props.creationDate, cPromptFlags<SnapshotMode>("Select mode"), _cSnap.props.guildID);
                     _cSnap.props = props;
+                    _cSnap.Save();
                     break;
-                case "send":
+                default:
+                    Console.WriteLine("Command not implemented");
                     break;
             }
             if (r is not "exit") goto mainLoop;

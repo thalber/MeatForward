@@ -50,7 +50,10 @@ namespace MeatForward
                             "NAME TEXT NOT NULL, " +
                             "TYPE INTEGER, " +
                             "CATID TEXT, " +
-                            "TOPIC TEXT",
+                            "TOPIC TEXT, " +
+                            "NSFW INTEGER NOT NULL, " +
+                            "SLOWMODE INTEGER NOT NULL, " +
+                            "POSITION INTEGER",
                             DB_Roles => "ID INTEGER PRIMARY KEY AUTOINCREMENT, " +
                             "NATIVEID INTEGER NOT NULL, " +
                             "NAME INTEGER NOT NULL, " +
@@ -134,7 +137,7 @@ namespace MeatForward
             SqliteDataReader? r = default;
             List<Discord.Overwrite> res = new();
             SqliteCommand cmd1 = DB.CreateCommand();
-            cmd1.CommandText = $"SELECT {DB_Overwrites}.*, {DB_Channels}.NATIVEID " +
+            cmd1.CommandText = $"SELECT {DB_Overwrites}.*, {DB_Channels}.NATIVEID as NATIVEID " +
                 $"FROM {DB_Overwrites} " +
                 $"INNER JOIN {DB_Channels} ON {DB_Overwrites}.CHANNELID={DB_Channels}.ID;";
             try
@@ -165,6 +168,7 @@ namespace MeatForward
             }
 
         done:
+            Console.WriteLine($"SCROM3: {res.Count()}");
             return res.ToArray();
         }
 
@@ -175,51 +179,59 @@ namespace MeatForward
         /// <param name=""></param>
         /// <param name="ch"></param>
         /// <returns>resulting internal ID, null if failure</returns>
-        public int? SetChannelData(ulong nativeid, channelVanityData ch)
+        public int? SetChannelData(ulong nativeid, channelStoreData ch)
         {
             SqliteDataReader? r = default, r0 = default;
             SqliteCommand cmd0 = DB.CreateCommand(), cmd1 = DB.CreateCommand();
             cmd0.CommandText = $"SELECT * FROM {DB_Channels} WHERE NATIVEID={nativeid}";
             int? res = default;
             bool alreadyKnown;
-            channelVanityData chTest = default;
+            channelStoreData chTest = default;
             Console.WriteLine($"Attempting to add channel record for {ch.name} ({nativeid}...)");
 
             try
             {
                 refreshRes();
-                if (alreadyKnown)
+                if (res.HasValue)
                 {
-                    r0 = cmd0.ExecuteReader(System.Data.CommandBehavior.SingleResult);
-                    chTest = new channelVanityData().fillFromCurrentRow(r0);
+                    chTest = GetChannelData(res.Value) ?? default;
                 }
-
+                var vals = ch.postValues();
                 cmd1.CommandText = alreadyKnown
                     //update existing record
                     ? $"UPDATE {DB_Channels} " +
                     $"SET NAME=$chname, " +
-                    $"TYPE={(int?)ch.type ?? 0}, " +
-                    $"CATID={ch.categoryId ?? (object)"NULL"}, " +
-                    $"TOPIC=$chtopic " +
+                    $"TYPE={vals["TYPE"].val}, " +
+                    $"CATID={vals["CATID"].val}, " +
+                    $"TOPIC=$chtopic, " +
+                    $"NSFW={vals["NSFW"].val}, " +
+                    $"SLOWMODE={vals["SLOWMODE"].val}," +
+                    $"POSITION={vals["POSITION"].val} " +
                     $"WHERE ID={res} "
                     //or create new record
                     : $"INSERT INTO {DB_Channels} " +
-                    $"(NAME, NATIVEID, TYPE, CATID, TOPIC) " +
+                    $"(NAME, NATIVEID, TYPE, CATID, TOPIC, NSFW, SLOWMODE, POSITION) " +
                     $"VALUES " +
-                    $"($chname, {nativeid}, {(int?)ch.type ?? 0}, {ch.categoryId ?? (object)"NULL"}, $chtopic)";
+                    $"($chname, {nativeid}, {vals["TYPE"].val}, {vals["CATID"].val}, $chtopic, {vals["NSFW"].val}, {vals["SLOWMODE"].val}, {vals["POSITION"].val})";
                 //cmd1.Parameters.AddWithValue("$chname", ch.name);
                 //cmd1.Parameters.AddWithValue("$chtopic", ch.topic);
-                cmd1.Parameters.AddWithValue("$chname", ch.name);
-                cmd1.Parameters.AddWithValue("$chtopic", ch.topic ?? "NULL");
+                cmd1.Parameters.AddWithValue("$chname", vals["NAME"].val);
+                cmd1.Parameters.AddWithValue("$chtopic", vals["TOPIC"].val);
                 //cmd1.Parameters.AddWithValue("$tp", ch.type);
                 //cmd1.Parameters.AddWithValue("$catid", ch.categoryId);
                 //cmd1.Parameters.AddWithValue("$ntid", nativeid);
+                
 
-                if (!chTest.Equals(ch)) cmd1.ExecuteNonQuery();
+                if (!chTest.Equals(ch))
+                {
+                    Console.WriteLine($"Added channel record, recording overwrites... {cmd1.CommandText}");
+                    cmd1.ExecuteNonQuery();
+                    refreshRes();
+                    SetOverwrites(res.Value, ch.permOverwrites);
+                }
+                else Console.WriteLine("Channel data identical, skipping");
 
-                refreshRes();
-                Console.WriteLine($"Added channel record, recording overwrites");
-                SetOverwrites(res.Value, ch.permOverwrites);
+                
 
                 //SetOverwrites()
                 //foreach ()
@@ -242,7 +254,7 @@ namespace MeatForward
                 try
                 {
                     res = getEntityInternalID(nativeid, DB_Channels);
-                    alreadyKnown = true;
+                    alreadyKnown = res is not null;
                 }
                 catch (ArgumentException aex)
                 {
@@ -252,15 +264,15 @@ namespace MeatForward
                 }
             }
         }
-        public channelVanityData? GetChannelData(int id)
+        public channelStoreData? GetChannelData(int id)
         {
             //todo: test
             SqliteDataReader? rdata = default, odata = default;
             SqliteCommand cmd0 = DB.CreateCommand(), cmd1 = DB.CreateCommand();
             //var ;
-            cmd0.CommandText = $"SELECT * FROM {DB_Channels} WHERE ID=&tid;";
+            cmd0.CommandText = $"SELECT * FROM {DB_Channels} WHERE ID={id};";
             //cmd0.Parameters.AddWithValue("$tname", SQL_Channels);
-            cmd0.Parameters.AddWithValue("$tid", id);
+            //cmd0.Parameters.AddWithValue("$tid", id);
 
             //cmd1.CommandText = $"SELECT * FROM {SQL_Overwrites} WHERE ROLEID={id}";
 
@@ -271,12 +283,12 @@ namespace MeatForward
 
                 rdata.Read();
 
-                channelVanityData res = new(
-                    rdata.GetString(rdata.GetOrdinal("NAME")),
-                    (Discord.ChannelType)rdata.GetInt32(rdata.GetOrdinal("TYPE")),
-                    (ulong?)rdata.GetInt64(rdata.GetOrdinal("CATID")),
-                    rdata.GetString(rdata.GetOrdinal("TOPIC")),
-                    GetOverwrites(id));
+                channelStoreData res = new channelStoreData().fillFromCurrentRow(rdata).fetchOverwrites(this);
+                    //rdata.GetString(rdata.GetOrdinal("NAME")),
+                    //(Discord.ChannelType)rdata.GetInt32(rdata.GetOrdinal("TYPE")),
+                    //(ulong?)rdata.GetInt64(rdata.GetOrdinal("CATID")),
+                    //rdata.GetString(rdata.GetOrdinal("TOPIC")),
+                    //GetOverwrites(id));
 
                 return res;
             }
@@ -294,34 +306,36 @@ namespace MeatForward
             }
         }
 
-        private int getEntityInternalID(ulong nativeID, string tablename)
+        public int? getEntityInternalID(ulong nativeID, string tablename)
         {
             if (!withIds.Contains(tablename)) throw new ArgumentException($"INVALID TABLE {tablename}!");
-            int res = default;
+            int? res = default;
             SqliteCommand cmd0 = DB.CreateCommand();
             SqliteDataReader? r = default;
             cmd0.CommandText = @$"SELECT * FROM {tablename} WHERE NATIVEID={nativeID};";
             cmd0.Parameters.AddWithValue("$tname", tablename).SqliteType = SqliteType.Text;
             cmd0.Parameters.AddWithValue("$ntid", nativeID).SqliteType = SqliteType.Integer;
             r = cmd0.ExecuteReader();
-            if (!r.HasRows) throw new ArgumentException($"{tablename} : record for {nativeID} not found!");
+            if (!r.HasRows) goto cret; //throw new ArgumentException($"{tablename} : record for {nativeID} not found!");
             r.Read();
             res = r.GetInt32(r.GetOrdinal("ID"));
+        cret:;
             r?.Close();
             return res;
         }
-        private void updateEntityInternalID(string tablename, int id, ulong newNative)
+        public void updateEntityNativeID(string tablename, int id, ulong newNative)
         {
             if (!withIds.Contains(tablename)) throw new ArgumentException("INVALID TABLE!");
             SqliteCommand cmd0 = DB.CreateCommand();
-            cmd0.CommandText = $"UPDATE $tname " +
-                $"SET NATIVEID=$ntid " +
+            cmd0.CommandText = $"UPDATE {tablename} " +
+                $"SET NATIVEID={newNative} " +
                 $"WHERE ID={id};";
             cmd0.Parameters.AddWithValue("$ntid", newNative);
+            cmd0.Parameters.AddWithValue("&tname", tablename);
             cmd0.ExecuteNonQuery();
         }
 
-        public int? SetRoleData(ulong nativeID, roleVanityData rl)
+        public int? SetRoleData(ulong nativeID, roleStoreData rl)
         {
             bool alreadyKnown = false;
             SqliteDataReader r = null;
@@ -332,14 +346,16 @@ namespace MeatForward
             try
             {
                 refreshRes();
+
+                var vals = rl.postValues();
                 cmd0.CommandText = alreadyKnown
                     //update existing record
                     ? $"UPDATE {DB_Roles} " +
-                    $"SET COLOR={rl.col?.RawValue ?? 0}, " +
-                    $"HOIST = {(rl.hoist ? 1 : 0)}, " +
-                    $"MENT = {(rl.ment ? 1 : 0)}, " +
+                    $"SET COLOR={vals["COLOR"].val}, " +
+                    $"HOIST = {vals["HOIST"].val}, " +
+                    $"MENT = {vals["MENT"].val}, " +
                     $"NAME=$rname, " +
-                    $"PERMS={rl.perms} " +
+                    $"PERMS={vals["PERMS"].val} " +
                     $"WHERE ID={res};"
                     //@$"SET COLOR=$col, " +
                     //@$"HOIST=$hoist, " +
@@ -350,13 +366,13 @@ namespace MeatForward
                     : @$"INSERT INTO " + DB_Roles + " " +
                     @$" (NATIVEID, COLOR, HOIST, MENT, NAME, PERMS) " +
                     @$"VALUES " +
-                    @$"({nativeID}, {rl.col?.RawValue ?? 0}, {(rl.hoist ? 1 : 0)}, {(rl.ment ? 1 : 0)}, $rname, {rl.perms})";
+                    @$"({nativeID}, {vals["COLOR"].val}, {vals["HOIST"].val}, {vals["MENT"].val}, $rname, {vals["PERMS"].val})";
                 //@$"(&nid, $col, $hoist, $ment, $rname)";
-                cmd0.Parameters.AddWithValue("$col", rl.col ?? (object)"NULL");
-                cmd0.Parameters.AddWithValue("$hoist", rl.hoist);
-                cmd0.Parameters.AddWithValue("$ment", rl.ment);
-                cmd0.Parameters.AddWithValue("$rname", rl.name);
-                cmd0.Parameters.AddWithValue("$nid", nativeID);
+                //cmd0.Parameters.AddWithValue("$col", rl.col ?? (object)"NULL");
+                //cmd0.Parameters.AddWithValue("$hoist", rl.hoist);
+                //cmd0.Parameters.AddWithValue("$ment", rl.ment);
+                cmd0.Parameters.AddWithValue("$rname", vals["NAME"].val);
+                //cmd0.Parameters.AddWithValue("$nid", nativeID);
                 var c = cmd0.ExecuteNonQuery();
             }
             catch (Exception ex)
@@ -377,7 +393,7 @@ namespace MeatForward
                 try
                 {
                     res = getEntityInternalID(nativeID, DB_Roles);
-                    alreadyKnown = true;
+                    alreadyKnown = res is not null;
                 }
                 catch (ArgumentException aex)
                 {
@@ -386,22 +402,23 @@ namespace MeatForward
                 }
             }
         }
-        public roleVanityData? GetRoleData(int id)
+        public roleStoreData? GetRoleData(int id)
         {
             SqliteDataReader r = default;
             SqliteCommand cmd0 = DB.CreateCommand();
-            roleVanityData? res = default;
+            roleStoreData? res = default;
             cmd0.CommandText = $"SELECT * FROM {DB_Roles} WHERE ID={id}";
             try
             {
                 r = cmd0.ExecuteReader(System.Data.CommandBehavior.SingleRow);
                 if (!r.HasRows) goto done;
                 r.Read();
-                res = new roleVanityData(new Discord.Color((uint)r.GetInt32(r.GetOrdinal("COLOR"))),
-                    r.GetBoolean(r.GetOrdinal("HOIST")),
-                    r.GetBoolean(r.GetOrdinal("MENT")),
-                    (ulong)r.GetInt64(r.GetOrdinal("PERMS")),
-                    r.GetString(r.GetOrdinal("NAME")));
+                res = new roleStoreData().fillFromCurrentRow(r);
+                    //(ulong)r.GetInt64(r.GetOrdinal()) new Discord.Color((uint)r.GetInt32(r.GetOrdinal("COLOR"))),
+                    //r.GetBoolean(r.GetOrdinal("HOIST")),
+                    //r.GetBoolean(r.GetOrdinal("MENT")),
+                    //(ulong)r.GetInt64(r.GetOrdinal("PERMS")),
+                    //r.GetString(r.GetOrdinal("NAME")));
 #warning impl
             }
             catch (Exception ex)
@@ -417,10 +434,9 @@ namespace MeatForward
         }
 
         #region dispense
-        
-        public IEnumerator<roleVanityData> getAllRoleData()
+        public IEnumerable<roleStoreData> getAllRoleData()
         {
-            SqliteDataReader r = default;
+            SqliteDataReader? r = default;
             SqliteCommand cmd0 = DB.CreateCommand();
             cmd0.CommandText = $"SELECT * FROM {DB_Roles};";
             r = cmd0.ExecuteReader();
@@ -430,7 +446,7 @@ namespace MeatForward
                 if (!r.HasRows) goto done;
                 while (r.Read())
                 {
-                    yield return new roleVanityData().fillFromCurrentRow(r);
+                    yield return new roleStoreData().fillFromCurrentRow(r);
                 }
             }
             finally
@@ -440,6 +456,26 @@ namespace MeatForward
             done: yield break;
         }
 
+        public IEnumerable<channelStoreData> getAllChannelData()
+        {
+            SqliteDataReader? r = default;
+            SqliteCommand cmd0 = DB.CreateCommand();
+            cmd0.CommandText = $"SELECT * FROM {DB_Channels};";
+            try
+            {
+                r = cmd0.ExecuteReader();
+                if (!r.HasRows) goto done;
+                while (r.Read())
+                {
+                    yield return new channelStoreData().fillFromCurrentRow(r).fetchOverwrites(this);
+                }
+            }
+            finally { r?.Close(); }
+
+
+            done:;
+            yield break;
+        }
         #endregion
 
     }

@@ -156,7 +156,7 @@ namespace MeatForward
                         if (_cSnap is null) { Console.WriteLine("No snapshot open!"); break; }
                         guild = _client.GetGuild(_cSnap.props.guildID);
                         if (guild is null) { Console.WriteLine("Not in target guild!"); break; }
-                        RequestOptions rqp = new() { AuditLogReason = $"Automated rollback from {_cSnap}", RetryMode = RetryMode.AlwaysRetry };
+                        RequestOptions rqp = new() { AuditLogReason = $"Automated rollback from {_cSnap.ToString()}", RetryMode = RetryMode.AlwaysRetry };
 
                         bool recreateMissingRoles = cPromptBinary("Recreate missing roles?"),
                             recreateMissingChannels = cPromptBinary("Recreate missing channels?"),
@@ -309,19 +309,19 @@ namespace MeatForward
 
                     restoreChannelPerms:
                         List<(channelStoreData record, Task t)> restoreChannelPermTasks = new();
-                        Func<Overwrite, object> gh = xx => (xx.TargetId, xx.TargetType, xx.Permissions.AllowValue, xx.Permissions.DenyValue);
+                        Func<Overwrite, object> seld = xx => (xx.TargetId, xx.TargetType, xx.Permissions.AllowValue, xx.Permissions.DenyValue);
                         foreach (var record in _cSnap.getAllChannelData())
                         {
                             var channel = guild.Channels.FirstOrDefault(rl => rl.Id == record.nativeid);
                             if (channel is null) continue;
                             if (!channel.getStoreData().Equals(record))
                             {
-                                Console.WriteLine($"Overwrites dont match! updating {Newtonsoft.Json.JsonConvert.SerializeObject(record.permOverwrites.Select(gh))}");
+                                Console.WriteLine($"Overwrites dont match! updating {Newtonsoft.Json.JsonConvert.SerializeObject(record.permOverwrites.Select(seld))}");
                                 restoreChannelPermTasks.Add((record, channel.ModifyAsync(ch =>
                                 {
                                     ch.PermissionOverwrites = new Optional<IEnumerable<Overwrite>>(record.permOverwrites);
                                     
-                                    Console.WriteLine($"SCROM : {record.name}, {Newtonsoft.Json.JsonConvert.SerializeObject(ch.PermissionOverwrites.Value.Select(gh))}");
+                                    Console.WriteLine($"SCROM : {record.name}, {Newtonsoft.Json.JsonConvert.SerializeObject(ch.PermissionOverwrites.Value.Select(seld))}");
                                 },
                                 rqp)));
                             }

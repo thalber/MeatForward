@@ -86,6 +86,8 @@ namespace MeatForward
                 return false;
             }
         }
+
+        #region ows
         /// <summary>
         /// Records perm overwrites for a given channel
         /// </summary>
@@ -134,43 +136,107 @@ namespace MeatForward
         public Discord.Overwrite[] GetOverwrites(int channelid)
         {
             //todo: test
-            SqliteDataReader? r = default;
-            List<Discord.Overwrite> res = new();
-            SqliteCommand cmd1 = DB.CreateCommand();
-            cmd1.CommandText = $"SELECT {DB_Overwrites}.*, {DB_Channels}.NATIVEID as NATIVEID " +
-                $"FROM {DB_Overwrites} " +
-                $"INNER JOIN {DB_Channels} ON {DB_Overwrites}.CHANNELID={DB_Channels}.ID;";
+            //    SqliteDataReader? r = default;
+            //    List<Discord.Overwrite> res = new();
+            //    SqliteCommand cmd1 = DB.CreateCommand();
+            //    cmd1.CommandText = $"SELECT {DB_Overwrites}.*, {DB_Channels}.NATIVEID as CHNATID " +
+            //        $"FROM {DB_Overwrites} " +
+            //        $"INNER JOIN {DB_Channels} ON {DB_Overwrites}.CHANNELID={DB_Channels}.ID;";
+            //    try
+            //    {
+            //        r = cmd1.ExecuteReader();
+            //        if (!r.HasRows) goto done;
+            //        var o_sc = r.GetSchemaTable();
+            //        while (r.Read())
+            //        {
+            //            Discord.Overwrite rpart = new(
+            //                (ulong)r.GetInt64(r.GetOrdinal("NATIVEID")),
+            //                (Discord.PermissionTarget)r.GetInt32(r.GetOrdinal("TARGETTYPE")),
+            //                new Discord.OverwritePermissions(
+            //                    (ulong)r.GetInt64(r.GetOrdinal("PERMSALLOW")),
+            //                    (ulong)r.GetInt64(r.GetOrdinal("PERMSDENY"))
+            //                    ));
+            //            res.Add(rpart);
+            //        }
+            //    }
+            //    catch (Exception e)
+            //    {
+            //        Console.WriteLine($"Error retrieving overwrites for {channelid} : {e}");
+            //    }
+            //    finally
+            //    {
+            //        r?.Close();
+            //        cmd1?.Dispose();
+            //    }
+
+            //done:
+            //    Console.WriteLine($"SCROM3: {res.Count()}");
+            //    return res.ToArray();
+            return getRoleOverwrites(channelid).Concat(getUserOverwrites(channelid)).ToArray();
+        }
+
+        internal IEnumerable<Discord.Overwrite> getRoleOverwrites(int channelid)
+        {
+            SqliteDataReader r = default;
+            SqliteCommand cmd0 = DB.CreateCommand();
+            cmd0.CommandText = $"SELECT {DB_Overwrites}.*, {DB_Roles}.NATIVEID " +
+                $"FROM {DB_Overwrites} INNER JOIN {DB_Roles} " +
+                $"ON {DB_Overwrites}.TARGETID={DB_Roles}.ID AND {DB_Overwrites}.TARGETTYPE={(int)Discord.PermissionTarget.Role} " +
+                $"WHERE {DB_Overwrites}.CHANNELID={channelid};";
             try
             {
-                r = cmd1.ExecuteReader();
-                if (!r.HasRows) goto done;
-                var o_sc = r.GetSchemaTable();
+                r = cmd0.ExecuteReader();
+                if (!r.HasRows) goto imdone;
                 while (r.Read())
                 {
-                    Discord.Overwrite rpart = new(
-                        (ulong)r.GetInt64(r.GetOrdinal("NATIVEID")),
-                        (Discord.PermissionTarget)r.GetInt32(r.GetOrdinal("TARGETTYPE")),
+                    yield return new Discord.Overwrite((ulong)r.GetInt64(r.GetOrdinal("NATIVEID")),
+                        Discord.PermissionTarget.Role,
                         new Discord.OverwritePermissions(
                             (ulong)r.GetInt64(r.GetOrdinal("PERMSALLOW")),
                             (ulong)r.GetInt64(r.GetOrdinal("PERMSDENY"))
-                            ));
-                    res.Add(rpart);
+                            )
+                        );
                 }
-            }
-            catch (Exception e)
-            {
-                Console.WriteLine($"Error retrieving overwrites for {channelid} : {e}");
             }
             finally
             {
                 r?.Close();
-                cmd1?.Dispose();
             }
-
-        done:
-            Console.WriteLine($"SCROM3: {res.Count()}");
-            return res.ToArray();
+        imdone:
+            yield break;
         }
+        internal IEnumerable<Discord.Overwrite> getUserOverwrites(int channelid)
+        {
+            SqliteDataReader r = default;
+            SqliteCommand cmd0 = DB.CreateCommand();
+            cmd0.CommandText = $"SELECT {DB_Overwrites}.*, {DB_Users}.NATIVEID " +
+                $"FROM {DB_Overwrites} INNER JOIN {DB_Users} " +
+                $"ON {DB_Overwrites}.TARGETID={DB_Users}.ID AND {DB_Overwrites}.TARGETTYPE={(int)Discord.PermissionTarget.User} " +
+                $"WHERE {DB_Overwrites}.CHANNELID={channelid};";
+            try
+            {
+                r = cmd0.ExecuteReader();
+                if (!r.HasRows) goto imdone;
+                while (r.Read())
+                {
+                    yield return new Discord.Overwrite((ulong)r.GetInt64(r.GetOrdinal("NATIVEID")),
+                        Discord.PermissionTarget.Role,
+                        new Discord.OverwritePermissions(
+                            (ulong)r.GetInt64(r.GetOrdinal("PERMSALLOW")),
+                            (ulong)r.GetInt64(r.GetOrdinal("PERMSDENY"))
+                            )
+                        );
+                }
+            }
+            finally
+            {
+                r?.Close();
+            }
+        imdone:
+            yield break;
+        }
+
+        #endregion
 
         /// <summary>
         /// 

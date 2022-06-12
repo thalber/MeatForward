@@ -93,7 +93,7 @@ namespace MeatForward
         /// </summary>
         /// <param name="channelid"></param>
         /// <param name="ows"></param>
-        public void SetOverwrites(int channelid, Discord.Overwrite[] ows)
+        public void SetOverwrites(int channelid, IEnumerable<Discord.Overwrite> ows)
         {
             //todo: test
             SqliteDataReader? r = default;
@@ -133,46 +133,9 @@ namespace MeatForward
                 //cmd?.Dispose();
             }
         }
-        public Discord.Overwrite[] GetOverwrites(int channelid)
+        public IEnumerable<Discord.Overwrite> GetOverwrites(int channelid)
         {
-            //todo: test
-            //    SqliteDataReader? r = default;
-            //    List<Discord.Overwrite> res = new();
-            //    SqliteCommand cmd1 = DB.CreateCommand();
-            //    cmd1.CommandText = $"SELECT {DB_Overwrites}.*, {DB_Channels}.NATIVEID as CHNATID " +
-            //        $"FROM {DB_Overwrites} " +
-            //        $"INNER JOIN {DB_Channels} ON {DB_Overwrites}.CHANNELID={DB_Channels}.ID;";
-            //    try
-            //    {
-            //        r = cmd1.ExecuteReader();
-            //        if (!r.HasRows) goto done;
-            //        var o_sc = r.GetSchemaTable();
-            //        while (r.Read())
-            //        {
-            //            Discord.Overwrite rpart = new(
-            //                (ulong)r.GetInt64(r.GetOrdinal("NATIVEID")),
-            //                (Discord.PermissionTarget)r.GetInt32(r.GetOrdinal("TARGETTYPE")),
-            //                new Discord.OverwritePermissions(
-            //                    (ulong)r.GetInt64(r.GetOrdinal("PERMSALLOW")),
-            //                    (ulong)r.GetInt64(r.GetOrdinal("PERMSDENY"))
-            //                    ));
-            //            res.Add(rpart);
-            //        }
-            //    }
-            //    catch (Exception e)
-            //    {
-            //        Console.WriteLine($"Error retrieving overwrites for {channelid} : {e}");
-            //    }
-            //    finally
-            //    {
-            //        r?.Close();
-            //        cmd1?.Dispose();
-            //    }
-
-            //done:
-            //    Console.WriteLine($"SCROM3: {res.Count()}");
-            //    return res.ToArray();
-            return getRoleOverwrites(channelid).Concat(getUserOverwrites(channelid)).ToArray();
+            return getRoleOverwrites(channelid).Concat(getUserOverwrites(channelid));//.ToArray();
         }
 
         internal IEnumerable<Discord.Overwrite> getRoleOverwrites(int channelid)
@@ -245,6 +208,71 @@ namespace MeatForward
         /// <param name=""></param>
         /// <param name="ch"></param>
         /// <returns>resulting internal ID, null if failure</returns>
+
+        #region idutils
+        public int? getEntityInternalID(ulong nativeID, string tablename)
+        {
+            if (!withIds.Contains(tablename)) throw new ArgumentException($"INVALID TABLE {tablename}!");
+            int? res = default;
+            SqliteCommand cmd0 = DB.CreateCommand();
+            SqliteDataReader? r = default;
+            cmd0.CommandText = @$"SELECT * FROM {tablename} WHERE NATIVEID={nativeID};";
+            cmd0.Parameters.AddWithValue("$tname", tablename).SqliteType = SqliteType.Text;
+            cmd0.Parameters.AddWithValue("$ntid", nativeID).SqliteType = SqliteType.Integer;
+            r = cmd0.ExecuteReader();
+            if (!r.HasRows) goto cret; //throw new ArgumentException($"{tablename} : record for {nativeID} not found!");
+            r.Read();
+            res = r.GetInt32(r.GetOrdinal("ID"));
+        cret:;
+            r?.Close();
+            return res;
+        }
+
+        public void updateEntityNativeID(string tablename, int id, ulong newNative)
+        {
+            if (!withIds.Contains(tablename)) throw new ArgumentException("INVALID TABLE!");
+            SqliteCommand cmd0 = DB.CreateCommand();
+            cmd0.CommandText = $"UPDATE {tablename} " +
+                $"SET NATIVEID={newNative} " +
+                $"WHERE ID={id};";
+            cmd0.Parameters.AddWithValue("$ntid", newNative);
+            cmd0.Parameters.AddWithValue("&tname", tablename);
+            cmd0.ExecuteNonQuery();
+        }
+
+        private void trimTable(IEnumerable<int> idList, string tablename, bool whitelist = true)
+        {
+            if (!withIds.Contains(tablename)) throw new ArgumentException("Invalid table!");
+            SqliteCommand cmd0 = DB.CreateCommand();
+            if (!idList.Any()) { if (!whitelist) return; cmd0.CommandText = "DELETE FROM "; goto exec; }
+            StringBuilder sb = new($"DELETE FROM {tablename} WHERE ID ");
+            if (whitelist) sb.Append("NOT ");
+            sb.Append("IN (");
+            foreach (var id in idList)
+            {
+                sb.Append($"{id}, ");
+            }
+            sb.Length -= 2;
+            sb.Append(")");
+            cmd0.CommandText = sb.ToString();
+        exec:;
+            try
+            {
+                Console.WriteLine($"Trimming {tablename} : {cmd0.CommandText}");
+                cmd0.ExecuteNonQuery();
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error trimming table {tablename}! {ex}");
+            }
+            finally
+            {
+                //r?.Close();
+            }
+        }
+
+        #endregion
+        #region channels
         public int? SetChannelData(ulong nativeid, channelStoreData ch)
         {
             SqliteDataReader? r = default, r0 = default;
@@ -372,35 +400,16 @@ namespace MeatForward
             }
         }
 
-        public int? getEntityInternalID(ulong nativeID, string tablename)
+        //gross
+        public void trimChannels(IEnumerable<ulong> nativeIDs, bool wl)
+            => trimChannels(nativeIDs.Select(xx => getEntityInternalID(xx, DB_Channels)).SkipWhile(xx => xx is null).Cast<int>(), wl);
+        public void trimChannels (IEnumerable<int> IDs, bool wl)
         {
-            if (!withIds.Contains(tablename)) throw new ArgumentException($"INVALID TABLE {tablename}!");
-            int? res = default;
-            SqliteCommand cmd0 = DB.CreateCommand();
-            SqliteDataReader? r = default;
-            cmd0.CommandText = @$"SELECT * FROM {tablename} WHERE NATIVEID={nativeID};";
-            cmd0.Parameters.AddWithValue("$tname", tablename).SqliteType = SqliteType.Text;
-            cmd0.Parameters.AddWithValue("$ntid", nativeID).SqliteType = SqliteType.Integer;
-            r = cmd0.ExecuteReader();
-            if (!r.HasRows) goto cret; //throw new ArgumentException($"{tablename} : record for {nativeID} not found!");
-            r.Read();
-            res = r.GetInt32(r.GetOrdinal("ID"));
-        cret:;
-            r?.Close();
-            return res;
+            trimTable(IDs, DB_Channels, wl);
         }
-        public void updateEntityNativeID(string tablename, int id, ulong newNative)
-        {
-            if (!withIds.Contains(tablename)) throw new ArgumentException("INVALID TABLE!");
-            SqliteCommand cmd0 = DB.CreateCommand();
-            cmd0.CommandText = $"UPDATE {tablename} " +
-                $"SET NATIVEID={newNative} " +
-                $"WHERE ID={id};";
-            cmd0.Parameters.AddWithValue("$ntid", newNative);
-            cmd0.Parameters.AddWithValue("&tname", tablename);
-            cmd0.ExecuteNonQuery();
-        }
+        #endregion
 
+        #region roles
         public int? SetRoleData(ulong nativeID, roleStoreData rl)
         {
             bool alreadyKnown = false;
@@ -498,6 +507,15 @@ namespace MeatForward
         done:
             return res;
         }
+
+        public void trimRoles(IEnumerable<ulong> nativeIDs, bool wl) 
+            => trimRoles(nativeIDs.Select(xx => getEntityInternalID(xx, DB_Roles)).SkipWhile(xx => xx is null).Cast<int>(), wl);
+
+        public void trimRoles(IEnumerable<int> IDs, bool wl)
+        {
+            trimTable(IDs, DB_Roles, wl);
+        }
+        #endregion
 
         #region dispense
         public IEnumerable<roleStoreData> getAllRoleData()

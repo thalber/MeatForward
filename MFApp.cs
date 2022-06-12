@@ -90,7 +90,7 @@ namespace MeatForward
             Console.WriteLine();
             Console.WriteLine($"Current snapshot: {_cSnap ?? "NULL!" as object}");
             var r = cPrompt("Select needed action: ",
-                new[] { "create", "capture", "rollback", "open", "close", "props", "send", "exit" },
+                new[] { "create", "capture", "rollback", "open", "close", "props", "send", "backup", "exit" },
                 true);
             //main loop
             switch (r)
@@ -107,7 +107,6 @@ namespace MeatForward
                         try
                         {
                             guild = cPrompt("Select guild", allguilds, true);
-
                         }
                         catch
                         {
@@ -146,6 +145,9 @@ namespace MeatForward
                         {
                             _cSnap.SetChannelData(channel.Id, channel.getStoreData());
                         }
+                        //trimming is no longer fucked :3
+                        _cSnap.trimChannels(guild.Channels.Select(xx => xx.Id), true);
+                        _cSnap.trimRoles(guild.Roles.Select(xx => xx.Id), true);
                     }
                     //todo: users
                     _cSnap.props.creationDate = DateTime.UtcNow;
@@ -292,7 +294,6 @@ namespace MeatForward
                                 },
                             rqp)));
                             }
-                            
                         }
                         foreach (var rpt in restoreRolePermTasks)
                         {
@@ -321,7 +322,7 @@ namespace MeatForward
                                 {
                                     ch.PermissionOverwrites = new Optional<IEnumerable<Overwrite>>(record.permOverwrites);
                                     
-                                    Console.WriteLine($"SCROM : {record.name}, {Newtonsoft.Json.JsonConvert.SerializeObject(ch.PermissionOverwrites.Value.Select(seld))}");
+                                    //Console.WriteLine($"SCROM : {record.name}, {Newtonsoft.Json.JsonConvert.SerializeObject(ch.PermissionOverwrites.Value.Select(seld))}");
                                 },
                                 rqp)));
                             }
@@ -345,7 +346,7 @@ namespace MeatForward
                         Console.WriteLine("There is a snapshot already opened! ");
                         break;
                     }
-                    var name = cPromptAny("Enter snapshot address");
+                    var name = cPromptAny("Enter snapshot address: >");
                     try
                     {
                         _cSnap = new SnapshotData(name, null);
@@ -361,9 +362,20 @@ namespace MeatForward
                     break;
                 case "props":
                     if (_cSnap is null) break;
-                    props = new(cPromptAny("Comment: "), _cSnap.props.creationDate, cPromptFlags<SnapshotMode>("Select mode"), _cSnap.props.guildID);
+                    props = new(cPromptAny("Comment: >"), _cSnap.props.creationDate, cPromptFlags<SnapshotMode>("Select mode"), _cSnap.props.guildID);
                     _cSnap.props = props;
                     _cSnap.Save();
+                    break;
+                case "backup":
+                    if (_cSnap is null) { Console.WriteLine("No snapshot!"); break; }
+
+                    var dest = cPromptAny("Select destination: >");
+                    if (Directory.Exists(dest)) { Console.WriteLine("Destination occupied!"); break; }
+
+                    var bu = _cSnap.makeBackup(dest);
+                    Console.WriteLine(bu is null ? "Couldn't create backup!" : $"Backup created: {bu}");
+                    break;
+                case "exit":
                     break;
                 default:
                     Console.WriteLine("Command not implemented");
@@ -372,6 +384,7 @@ namespace MeatForward
             if (r is not "exit") goto mainLoop;
             //end main loop
             //_cSnap = null;
+            _cSnap?.Save();
             Console.WriteLine("Exiting...");
             exitMark.Release();
         }

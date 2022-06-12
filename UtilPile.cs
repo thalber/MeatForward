@@ -15,7 +15,7 @@ namespace MeatForward
             foreach (var cat in ch.Guild.CategoryChannels) if (cat.Channels.Contains(ch)) return cat.Id;
             return null;
         }
-        internal static SnapshotData.channelStoreData getStoreData(this Discord.WebSocket.SocketGuildChannel channel, Overwrite[] ows = null)
+        internal static SnapshotData.channelStoreData getStoreData(this Discord.WebSocket.SocketGuildChannel channel, IEnumerable<Overwrite>? ows = null)
         {
             SnapshotData.channelStoreData data = new(channel.Id,
                 channel.Name,
@@ -25,7 +25,7 @@ namespace MeatForward
                 (channel as ITextChannel)?.IsNsfw ?? false,
                 (channel as ITextChannel)?.SlowModeInterval,
                 channel.Position,
-                channel.PermissionOverwrites.ToArray() ?? ows);
+                ows ?? channel.PermissionOverwrites);
             return data;
         }
 

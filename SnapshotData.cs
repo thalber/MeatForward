@@ -29,15 +29,29 @@ namespace MeatForward
             Save();
         }
 
+        public SnapshotData? makeBackup(string target)
+        {
+            SnapshotProperties nprops = this.props;
+            SnapshotData? res = default;
+            res = new SnapshotData(target, null, nprops);
+            DB.BackupDatabase(res.DB);
+            res.Save();
+            res.Close();
+            return res;
+        }
         public void Save()
         {
             File.WriteAllText(propPath, JsonConvert.SerializeObject(props));
             DB.Close();
             DB.Open();
         }
-        public void Reload()
+        public void Reconnect()
         {
 #warning impl
+        }
+        public void Close()
+        {
+            DB?.Close();
         }
         ~SnapshotData()
         {
@@ -60,7 +74,7 @@ namespace MeatForward
         //public string? comment { set { props.comment = value; } }
 
         public override string ToString()
-            => $"Snapshot {props.guildID} // {props.creationDate}" + props.comment is null ? $" // {props.comment}" : string.Empty;
+            => $"Snapshot {props.guildID} // {props.creationDate} " + (props.comment is not null ? $" // {props.comment}" : string.Empty);
 
         public struct SnapshotProperties
         {
@@ -99,8 +113,8 @@ namespace MeatForward
 
             //channelid, perm
             //public Dictionary<ulong, Overwrite[]> permOverwrites;// = new();
-            public Discord.Overwrite[] permOverwrites;
-            public channelStoreData(ulong nativeid, string name, Discord.ChannelType? type, ulong? catID, string? topic, bool isNsfw, int? slowModeInterval, int? position, Discord.Overwrite[] overwrites)
+            public IEnumerable<Discord.Overwrite> permOverwrites;
+            public channelStoreData(ulong nativeid, string name, Discord.ChannelType? type, ulong? catID, string? topic, bool isNsfw, int? slowModeInterval, int? position, IEnumerable<Discord.Overwrite> overwrites)
             {
                 this.nativeid = nativeid;
                 this.name = name;
@@ -143,7 +157,7 @@ namespace MeatForward
             public channelStoreData fetchOverwrites(SnapshotData sn)
             {
                 this.permOverwrites = sn.GetOverwrites(this.internalID);
-                Console.WriteLine($"SCROM@: {this.name}, {permOverwrites.Count()}");
+                //Console.WriteLine($"SCROM@: {this.name}, {permOverwrites.Count()}");
                 return this;
             }
             public channelStoreData fillFromCurrentRow(SqliteDataReader r)

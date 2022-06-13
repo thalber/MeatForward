@@ -4,6 +4,11 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using Microsoft.Data.Sqlite;
+using System.Collections;
+using System.Diagnostics.CodeAnalysis;
+
+using static MeatForward.UtilPile;
 
 namespace MeatForward
 {
@@ -15,9 +20,9 @@ namespace MeatForward
             foreach (var cat in ch.Guild.CategoryChannels) if (cat.Channels.Contains(ch)) return cat.Id;
             return null;
         }
-        internal static SnapshotData.channelStoreData getStoreData(this Discord.WebSocket.SocketGuildChannel channel, IEnumerable<Overwrite>? ows = null)
+        internal static SnapshotData.channelRecord getRecord(this Discord.WebSocket.SocketGuildChannel channel, IEnumerable<Overwrite>? ows = null)
         {
-            SnapshotData.channelStoreData data = new(channel.Id,
+            SnapshotData.channelRecord data = new(channel.Id,
                 channel.Name,
                 channel.GetChannelType(),
                 channel.getCatID(),
@@ -29,11 +34,59 @@ namespace MeatForward
             return data;
         }
 
-        internal static SnapshotData.roleStoreData getStoreData(this Discord.WebSocket.SocketRole role)
+        internal static SnapshotData.roleRecord getRecord(this Discord.WebSocket.SocketRole role)
         {
-            SnapshotData.roleStoreData res = new(role.Id, role.Color, role.IsHoisted, role.IsMentionable, role.Permissions.RawValue, role.Name);
+            SnapshotData.roleRecord res = new(role.Id, role.Color, role.IsHoisted, role.IsMentionable, role.Permissions.RawValue, role.Name);
 
             return res;
+        }
+
+//        internal static SnapshotData.userRecord getRecord(this Discord.IUser user)
+//        {
+//#error impl
+//            throw new NotImplementedException();
+//        }
+        internal static bool contentsEqual<T>(this IEnumerable<T> src, IEnumerable<T> other, Func<T, T, bool> comPred)
+        {
+            if (src is null || other is null) return false;
+            if (src.Count() != other.Count()) return false;
+            bool res = true;
+            IEnumerator<T> srcen = src.GetEnumerator(),
+                othen = other.GetEnumerator();
+            while (srcen.MoveNext())
+            {
+                othen.MoveNext();
+
+                res &= comPred(srcen.Current, othen.Current);
+            }
+
+            return res;
+        }
+
+        internal static string getColumnString(SqliteType tp, ColumnMods cfl)
+        {
+            StringBuilder sb = new();
+
+
+            sb.Append(tp switch
+            {
+                SqliteType.Real => "REAL ",
+                SqliteType.Integer => "INTEGER ",
+                SqliteType.Text => "TEXT ",
+                SqliteType.Blob or _ => "BLOB ",
+            });
+
+            if (cfl.HasFlag(ColumnMods.PrimeKey))
+            {
+                sb.Append("PRIMARY KEY ");
+            }
+            else
+            {
+                if (cfl.HasFlag(ColumnMods.Unique)) sb.Append("UNIQUE ");
+                if (cfl.HasFlag(ColumnMods.NotNull)) sb.Append("NOT NULL ");
+            }
+            if (cfl.HasFlag(ColumnMods.Autoincrement)) sb.Append("AUTOINCREMENT ");
+            return sb.ToString();
         }
 
         //internal static Dictionary<string, int> OrdinalsByNames(this Microsoft.Data.Sqlite.SqliteDataReader r)
@@ -63,5 +116,74 @@ namespace MeatForward
         public ActivityType Type => atype;
         public ActivityProperties Flags => ActivityProperties.None;
         public string Details => desc;
+    }
+
+    [Flags]
+    internal enum ColumnMods
+    {
+        None = 0b0,
+        Unique = 0b01,
+        NotNull = 0b10,
+        PrimeKey = 0b11,
+        Autoincrement = 0b100,
+    }
+
+    internal class tableTemplate : IEnumerable<columnHeaderInfo>
+    {
+        private List<columnHeaderInfo> columns = new();
+        public void Add(string name, ColumnMods mode, SqliteType tp)
+        {
+            columns.Add(new columnHeaderInfo(name, mode, tp));
+        }
+
+        public IEnumerator<columnHeaderInfo> GetEnumerator()
+        {
+            return ((IEnumerable<columnHeaderInfo>)columns).GetEnumerator();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator()
+        {
+            return ((IEnumerable)columns).GetEnumerator();
+        }
+    }
+    internal struct columnHeaderInfo// : IAmDataRow<columnHeaderInfo>
+    {
+        public string name;
+        public ColumnMods modifiers;
+        public SqliteType datatype;
+        public columnHeaderInfo(string name, ColumnMods modifiers, SqliteType type)
+        {
+            this.datatype = type;
+            this.name = name;
+            this.modifiers = modifiers;
+        }
+
+        public string getColumnDefString()
+            => $"{name} {getColumnString(datatype, modifiers)}";
+
+        ///// <summary>
+        ///// Intended to look at schema responses!
+        ///// </summary>
+        ///// <param name="r"></param>
+        ///// <returns></returns>
+        //public columnHeaderInfo fillFromCurrentRow(SqliteDataReader r)
+        //{
+        //    this.name = r.GetString(r.GetOrdinal("name"));
+        //    this.datatype = r.GetString(r.GetOrdinal("type")) switch
+        //    {
+        //        "REAL" => SqliteType.Real,
+        //        "INTEGER" => SqliteType.Integer,
+        //        "BLOB" => SqliteType.Blob,
+        //        "TEXT" or _ => SqliteType.Text
+        //    };
+        //    this.modifiers = default;
+        //    if (r.GetBoolean(r.GetOrdinal("notnull"))) modifiers |= ColumnMods.NotNull;
+        //    return this;
+        //}
+
+        //public Dictionary<string, (bool danger, object val)> postValues()
+        //{
+        //    throw new NotImplementedException();
+        //}
     }
 }

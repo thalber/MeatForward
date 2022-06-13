@@ -75,9 +75,6 @@ namespace MeatForward
         }
 
         //todo: user role caching
-        //putting that into json would be suboptimal, should consider making a mini sql db instead maybe?
-        //actually i  should have started with that maybe
-        //fuckkkkk aaaaaaaaaaaa
         public static async void RunMainLoop()
         {
         mainLoop:
@@ -86,7 +83,7 @@ namespace MeatForward
             SocketGuild[] allguilds = _client.Guilds.ToArray();
             SnapshotData.SnapshotProperties props = default;
             await _client.SetActivityAsync(new MeatActivity() { aname = "the pink mist pass by", desc = "" });
-
+            
             Console.WriteLine();
             Console.WriteLine($"Current snapshot: {_cSnap ?? "NULL!" as object}");
             var r = cPrompt("Select needed action: ",
@@ -136,18 +133,25 @@ namespace MeatForward
                             Console.WriteLine("Not in target guild!");
                             break;
                         }
-
+                        //var users = guild.DownloadUsersAsync();
+                        //var bans = guild.GetBansAsync();
                         foreach (var role in guild.Roles)
                         {
-                            _cSnap.SetRoleData(role.Id, role.getStoreData());
+                            _cSnap.SetRoleData(role.Id, role.getRecord());
                         }
                         foreach (var channel in guild.Channels)
                         {
-                            _cSnap.SetChannelData(channel.Id, channel.getStoreData());
+                            _cSnap.SetChannelData(channel.Id, channel.getRecord());
                         }
                         //trimming is no longer fucked :3
                         _cSnap.trimChannels(guild.Channels.Select(xx => xx.Id), true);
                         _cSnap.trimRoles(guild.Roles.Select(xx => xx.Id), true);
+
+                        //await users;
+                        //foreach (var u in guild.Users)
+                        //{
+
+                        //}
                     }
                     //todo: users
                     _cSnap.props.creationDate = DateTime.UtcNow;
@@ -164,11 +168,10 @@ namespace MeatForward
                             recreateMissingChannels = cPromptBinary("Recreate missing channels?"),
                             nullify = _cSnap.props.smode.HasFlag(SnapshotMode.ForceNullifyOmitted);
 
-
                     restoreRoles:
                         if (!recreateMissingRoles) goto restoreChannels;
                         Console.WriteLine("! Recreating missing roles...");
-                        List<(roleStoreData record, Task<RestRole> t)> restoreRoleTasks = new();
+                        List<(roleRecord record, Task<RestRole> t)> restoreRoleTasks = new();
                         foreach (var record in _cSnap.getAllRoleData())
                         {
                             if (!guild.Roles.Any(r => r.Id == record.nativeid))
@@ -206,16 +209,17 @@ namespace MeatForward
                     restoreChannels:
                         if (!recreateMissingChannels) goto restoreRolePerms;
                         //Console.WriteLine("! restoring");
-                        List<(channelStoreData record, Task t)> restoreChannelTasks = new();
+                        List<(channelRecord record, Task t)> restoreChannelTasks = new();
                         Console.WriteLine("! Recreating missing channels...");
                         foreach (var record in _cSnap.getAllChannelData())
                         {
                             if (!guild.Channels.Any(ch => ch.Id == record.nativeid))
                             {
-                                Console.WriteLine($"Channel {Newtonsoft.Json.JsonConvert.SerializeObject(record)}) not found. Queueing up recreation");
+                                Console.WriteLine($"Channel {record.name} : {record.internalID} (previously {record.nativeid}) not found. Queueing up recreation");
                                 restoreChannelTasks.Add((record,
                                     record.type switch
                                     {
+                                        //todo: threads and category alignment
                                         ChannelType.Voice => guild.CreateVoiceChannelAsync(record.name, ch =>
                                         {
                                             //ch.PermissionOverwrites = record.permOverwrites;
@@ -236,6 +240,8 @@ namespace MeatForward
                                         ChannelType.Text or _ => guild.CreateTextChannelAsync(record.name, ch =>
                                         {
                                             //ch.PermissionOverwrites = record.permOverwrites;
+                                            ch.Topic = record.topic;
+                                            
                                             ch.CategoryId = record.categoryId;
                                             ch.IsNsfw = record.isNsfw;
                                             ch.SlowModeInterval = record.slowModeInterval is 0 or null
@@ -265,6 +271,7 @@ namespace MeatForward
                                     continue;
                                 }
                                 _cSnap.updateEntityNativeID(DB_Channels, ct.record.internalID, result.Id);
+
                             }
                             catch (Exception ex)
                             {
@@ -277,13 +284,15 @@ namespace MeatForward
                         restoreChannelTasks.Clear();
 
                     restoreRolePerms:;
-                        List<(roleStoreData record, Task t)> restoreRolePermTasks = new();
+                        List<(roleRecord record, Task t)> restoreRolePermTasks = new();
+                        Console.WriteLine("! Restoring role perms...");
                         foreach (var roleRecord in _cSnap.getAllRoleData())
                         {
                             var role = guild.Roles.FirstOrDefault(rl => rl.Id == roleRecord.nativeid);
                             if (role is null) continue;
-                            if (!role.getStoreData().Equals(roleRecord))
+                            if (!role.getRecord().Equals(roleRecord))
                             {
+                                Console.WriteLine($"{role.Name}'s permissions do not match the record, updating...");
                                 restoreRolePermTasks.Add((roleRecord,
                                 role.ModifyAsync(rl => {
                                     rl.Permissions = new GuildPermissions(roleRecord.perms);
@@ -304,20 +313,25 @@ namespace MeatForward
                             catch (Exception ex)
                             {
                                 Console.WriteLine($"Error restoring role perms for {rpt.record.name} ({rpt.record.nativeid}): {ex}");
+                                errc++;
                             }
                         }
+                        Console.WriteLine($"{restoreRolePermTasks.Count} role perm restore tasks ran, errors: {errc}");
+                        errc = 0;
                         restoreRolePermTasks.Clear();
 
                     restoreChannelPerms:
-                        List<(channelStoreData record, Task t)> restoreChannelPermTasks = new();
+                        List<(channelRecord record, Task t)> restoreChannelPermTasks = new();
+
+                        Console.WriteLine("! restoring channel perm overwrites...");
                         Func<Overwrite, object> seld = xx => (xx.TargetId, xx.TargetType, xx.Permissions.AllowValue, xx.Permissions.DenyValue);
                         foreach (var record in _cSnap.getAllChannelData())
                         {
                             var channel = guild.Channels.FirstOrDefault(rl => rl.Id == record.nativeid);
                             if (channel is null) continue;
-                            if (!channel.getStoreData().Equals(record))
+                            if (!channel.getRecord().Equals(record))
                             {
-                                Console.WriteLine($"Overwrites dont match! updating {Newtonsoft.Json.JsonConvert.SerializeObject(record.permOverwrites.Select(seld))}");
+                                Console.WriteLine($"Overwrites for {channel.Name} ({channel.Id}) don't match! updating to {Newtonsoft.Json.JsonConvert.SerializeObject(record.permOverwrites.Select(seld))}");
                                 restoreChannelPermTasks.Add((record, channel.ModifyAsync(ch =>
                                 {
                                     ch.PermissionOverwrites = new Optional<IEnumerable<Overwrite>>(record.permOverwrites);
@@ -336,8 +350,12 @@ namespace MeatForward
                             catch (Exception ex)
                             {
                                 Console.WriteLine($"Error restoring permissions for channel {cprt.record.name} ({cprt.record.nativeid} : {ex}");
+                                errc++;
                             }
                         }
+                        Console.WriteLine($"{restoreChannelPermTasks.Count} channel overwrite restore tasks ran, errors : {errc}");
+                        errc = 0;
+                        restoreChannelPermTasks.Clear();
                     }
                     break;
                 case "open":

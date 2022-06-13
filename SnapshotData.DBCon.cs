@@ -21,9 +21,60 @@ namespace MeatForward
         //id (int) : nativeid (int) : name (text) : topic (string) : type()
         internal const string DB_Channels = "Channels";
         internal const string DB_Overwrites = "Permissions";
+        internal const string DB_RoleBindings = "RoleBindings";
 
-        internal readonly static string[] tables = new[] { DB_Roles, DB_Channels, DB_Overwrites, DB_Users };
+        internal readonly static string[] tables = new[] { DB_Roles, DB_Channels, DB_Overwrites, DB_Users, DB_RoleBindings };
         internal readonly static string[] withIds = new[] { DB_Roles, DB_Channels, DB_Users };
+
+        internal readonly static Dictionary<string, tableTemplate> tableTemplates = new()
+        {
+            { DB_Roles,
+                new()
+                {
+                    { "ID", ColumnMods.PrimeKey | ColumnMods.Autoincrement, SqliteType.Integer },
+                    { "NATIVEID", ColumnMods.NotNull, SqliteType.Integer },
+                    { "NAME", ColumnMods.NotNull, SqliteType.Text },
+                    { "COLOR", ColumnMods.NotNull, SqliteType.Integer },
+                    { "HOIST", ColumnMods.NotNull, SqliteType.Integer },
+                    { "MENT", ColumnMods.NotNull, SqliteType.Integer },
+                    { "PERMS", ColumnMods.NotNull, SqliteType.Integer },
+                } },
+            { DB_Users, 
+                new() 
+                {
+                    { "ID", ColumnMods.PrimeKey | ColumnMods.Autoincrement, SqliteType.Integer },
+                    { "NATIVEID", ColumnMods.NotNull, SqliteType.Integer },
+                    { "BANNED", ColumnMods.NotNull, SqliteType.Integer },
+                    { "BANREASON", ColumnMods.None, SqliteType.Text },
+                } },
+            { DB_Overwrites,
+                new()
+                {
+                    { "CHANNELID", ColumnMods.NotNull, SqliteType.Integer },
+                    { "TARGETTYPE", ColumnMods.NotNull, SqliteType.Integer },
+                    { "TARGETID", ColumnMods.NotNull, SqliteType.Integer },
+                    { "PERMSALLOW", ColumnMods.NotNull, SqliteType.Integer },
+                    { "PERMSDENY", ColumnMods.NotNull, SqliteType.Integer },
+                } },
+            { DB_Channels,
+                new()
+                {
+                    { "ID", ColumnMods.PrimeKey | ColumnMods.Autoincrement, SqliteType.Integer},
+                    { "NATIVEID", ColumnMods.NotNull, SqliteType.Integer },
+                    { "NAME", ColumnMods.NotNull, SqliteType.Text },
+                    { "TYPE", ColumnMods.None, SqliteType.Integer },
+                    { "NSFW", ColumnMods.NotNull, SqliteType.Integer },
+                    { "TOPIC", ColumnMods.None, SqliteType.Text },
+                    { "CATID", ColumnMods.None, SqliteType.Integer },
+                    { "SLOWMODE", ColumnMods.NotNull, SqliteType.Integer }
+                } },
+            {DB_RoleBindings,
+                new()
+                {
+                    { "ROLEID", ColumnMods.NotNull, SqliteType.Integer },
+                    { "USERID", ColumnMods.NotNull, SqliteType.Integer }
+                } }
+        };
         /// <summary>
         /// run *once*
         /// </summary>
@@ -35,54 +86,92 @@ namespace MeatForward
             try
             {
                 Console.WriteLine($"Opening a DB; new : {newDB}");
+                SqliteCommand cmdPokeTable = DB.CreateCommand(),
+                    cmdAddMissingColumns = DB.CreateCommand();
+                SqliteDataReader? r0 = default, r1 = default;
                 //var cmd01 = DB.CreateCommand();
                 //cmd01.CommandText = "PRAGMA main.";
-
-                if (newDB)
+                foreach (var table in tables)
                 {
-                    //var tablesToCheck = new[] { DB_Channels, DB_Roles, DB_Overwrites, DB_Users };
-                    foreach (var tname in tables)
+                    //i hate many things about this part
+                    var template = tableTemplates[table];
+                    try
                     {
-                        string tableheader = tname switch
+                        System.Data.DataTable? schema = default;
+                        cmdPokeTable.CommandText = $"SELECT * FROM {table};";
+                        r0 = cmdPokeTable.ExecuteReader();//.GetSchemaTable();
+                        r0.Close();
+                        schema = r0.GetSchemaTable();
+                        //
+                        foreach (var templateColumn in template)
                         {
-                            DB_Channels => "ID INTEGER PRIMARY KEY AUTOINCREMENT, " +
-                            "NATIVEID TEXT NOT NULL, " +
-                            "NAME TEXT NOT NULL, " +
-                            "TYPE INTEGER, " +
-                            "CATID TEXT, " +
-                            "TOPIC TEXT, " +
-                            "NSFW INTEGER NOT NULL, " +
-                            "SLOWMODE INTEGER NOT NULL, " +
-                            "POSITION INTEGER",
-                            DB_Roles => "ID INTEGER PRIMARY KEY AUTOINCREMENT, " +
-                            "NATIVEID INTEGER NOT NULL, " +
-                            "NAME INTEGER NOT NULL, " +
-                            "COLOR INTEGER, " +
-                            "HOIST INTEGER NOT NULL, " +
-                            "MENT INTEGER NOT NULL, " +
-                            "PERMS INTEGER NOT NULL",
-                            DB_Overwrites => "CHANNELID INTEGER NOT NULL, " +
-                            "TARGETTYPE INTEGER NOT NULL, " +
-                            "TARGETID INTEGER NOT NULL, " +
-                            "PERMSALLOW INTEGER NOT NULL, " +
-                            "PERMSDENY INTEGER NOT NULL",
-                            DB_Users => "ID INTEGER PRIMARY KEY AUTOINCREMENT, " +
-                            "NATIVEID INTEGER NOT NULL",
-                            _ => throw new ArgumentException()
-                        };
-                        var cmd = DB.CreateCommand();
-                        var cmdtext = @$"CREATE TABLE {tname} ({tableheader})";
-                        cmd.CommandText = cmdtext;
-                        cmd.Parameters.AddWithValue("$tablename", tname);//Add(new SqliteParameter("$tablename", tname));
-                        var r = cmd.ExecuteNonQuery();
+                            System.Data.DataRow? tarRow = null;
+                            foreach (System.Data.DataRow row in schema.Rows)
+                            {
+                                if ((string)row["name"] == templateColumn.name) { tarRow = row; break; }
+                            }
+                            if (tarRow is null)
+                            {
+                                cmdAddMissingColumns.CommandText = $"ALTER TABLE {table} " +
+                                    $"ADD ({templateColumn}";
+                            }
+                            //var ie = tableinfo.Rows as IEnumerable<object>;
+                            //if (!tableinfo.Rows as IEnumerable<object>) { }// Get Any())
+                        }
+                        
                     }
-                    Console.WriteLine("Created record tables");
+                    catch (SqliteException ex)
+                    {
+                        Console.WriteLine($"Table {table} not found, creating");
+                    }
+                    finally { r0?.Close(); }
                 }
+
+                //if (newDB)
+                //{
+                //    //var tablesToCheck = new[] { DB_Channels, DB_Roles, DB_Overwrites, DB_Users };
+                //    foreach (var tname in tables)
+                //    {
+                //        string tableheader = tname switch
+                //        {
+                //            DB_Channels => "ID INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                //            "NATIVEID TEXT NOT NULL, " +
+                //            "NAME TEXT NOT NULL, " +
+                //            "TYPE INTEGER, " +
+                //            "CATID TEXT, " +
+                //            "TOPIC TEXT, " +
+                //            "NSFW INTEGER NOT NULL, " +
+                //            "SLOWMODE INTEGER NOT NULL, " +
+                //            "POSITION INTEGER",
+                //            DB_Roles => "ID INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                //            "NATIVEID INTEGER NOT NULL, " +
+                //            "NAME INTEGER NOT NULL, " +
+                //            "COLOR INTEGER, " +
+                //            "HOIST INTEGER NOT NULL, " +
+                //            "MENT INTEGER NOT NULL, " +
+                //            "PERMS INTEGER NOT NULL",
+                //            DB_Overwrites => "CHANNELID INTEGER NOT NULL, " +
+                //            "TARGETTYPE INTEGER NOT NULL, " +
+                //            "TARGETID INTEGER NOT NULL, " +
+                //            "PERMSALLOW INTEGER NOT NULL, " +
+                //            "PERMSDENY INTEGER NOT NULL",
+                //            DB_Users => "ID INTEGER PRIMARY KEY AUTOINCREMENT, " +
+                //            "NATIVEID INTEGER NOT NULL",
+                //            _ => throw new ArgumentException()
+                //        };
+                //        var cmd = DB.CreateCommand();
+                //        var cmdtext = @$"CREATE TABLE {tname} ({tableheader})";
+                //        cmd.CommandText = cmdtext;
+                //        cmd.Parameters.AddWithValue("$tablename", tname);//Add(new SqliteParameter("$tablename", tname));
+                //        var r = cmd.ExecuteNonQuery();
+                //    }
+                //    Console.WriteLine("Created record tables");
+                //}
                 return true;
             }
             catch (Exception e)
             {
-                Console.WriteLine(e.ToString());
+                Console.WriteLine($" Error linking DB : {e}");
                 return false;
             }
         }
@@ -240,6 +329,7 @@ namespace MeatForward
             cmd0.ExecuteNonQuery();
         }
 
+        //todo: trim by arbitrary column
         private void trimTable(IEnumerable<int> idList, string tablename, bool whitelist = true)
         {
             if (!withIds.Contains(tablename)) throw new ArgumentException("Invalid table!");
@@ -273,14 +363,14 @@ namespace MeatForward
 
         #endregion
         #region channels
-        public int? SetChannelData(ulong nativeid, channelStoreData ch)
+        public int? SetChannelData(ulong nativeid, channelRecord ch)
         {
             SqliteDataReader? r = default, r0 = default;
             SqliteCommand cmd0 = DB.CreateCommand(), cmd1 = DB.CreateCommand();
             cmd0.CommandText = $"SELECT * FROM {DB_Channels} WHERE NATIVEID={nativeid}";
             int? res = default;
             bool alreadyKnown;
-            channelStoreData chTest = default;
+            channelRecord chTest = default;
             Console.WriteLine($"Attempting to add channel record for {ch.name} ({nativeid}...)");
 
             try
@@ -358,7 +448,7 @@ namespace MeatForward
                 }
             }
         }
-        public channelStoreData? GetChannelData(int id)
+        public channelRecord? GetChannelData(int id)
         {
             //todo: test
             SqliteDataReader? rdata = default, odata = default;
@@ -377,7 +467,7 @@ namespace MeatForward
 
                 rdata.Read();
 
-                channelStoreData res = new channelStoreData().fillFromCurrentRow(rdata).fetchOverwrites(this);
+                channelRecord res = new channelRecord().fillFromCurrentRow(rdata).fetchOverwrites(this);
                     //rdata.GetString(rdata.GetOrdinal("NAME")),
                     //(Discord.ChannelType)rdata.GetInt32(rdata.GetOrdinal("TYPE")),
                     //(ulong?)rdata.GetInt64(rdata.GetOrdinal("CATID")),
@@ -410,7 +500,7 @@ namespace MeatForward
         #endregion
 
         #region roles
-        public int? SetRoleData(ulong nativeID, roleStoreData rl)
+        public int? SetRoleData(ulong nativeID, roleRecord rl)
         {
             bool alreadyKnown = false;
             SqliteDataReader r = null;
@@ -477,18 +567,18 @@ namespace MeatForward
                 }
             }
         }
-        public roleStoreData? GetRoleData(int id)
+        public roleRecord? GetRoleData(int id)
         {
             SqliteDataReader r = default;
             SqliteCommand cmd0 = DB.CreateCommand();
-            roleStoreData? res = default;
+            roleRecord? res = default;
             cmd0.CommandText = $"SELECT * FROM {DB_Roles} WHERE ID={id}";
             try
             {
                 r = cmd0.ExecuteReader(System.Data.CommandBehavior.SingleRow);
                 if (!r.HasRows) goto done;
                 r.Read();
-                res = new roleStoreData().fillFromCurrentRow(r);
+                res = new roleRecord().fillFromCurrentRow(r);
                     //(ulong)r.GetInt64(r.GetOrdinal()) new Discord.Color((uint)r.GetInt32(r.GetOrdinal("COLOR"))),
                     //r.GetBoolean(r.GetOrdinal("HOIST")),
                     //r.GetBoolean(r.GetOrdinal("MENT")),
@@ -518,7 +608,7 @@ namespace MeatForward
         #endregion
 
         #region dispense
-        public IEnumerable<roleStoreData> getAllRoleData()
+        public IEnumerable<roleRecord> getAllRoleData()
         {
             SqliteDataReader? r = default;
             SqliteCommand cmd0 = DB.CreateCommand();
@@ -530,7 +620,7 @@ namespace MeatForward
                 if (!r.HasRows) goto done;
                 while (r.Read())
                 {
-                    yield return new roleStoreData().fillFromCurrentRow(r);
+                    yield return new roleRecord().fillFromCurrentRow(r);
                 }
             }
             finally
@@ -540,7 +630,7 @@ namespace MeatForward
             done: yield break;
         }
 
-        public IEnumerable<channelStoreData> getAllChannelData()
+        public IEnumerable<channelRecord> getAllChannelData()
         {
             SqliteDataReader? r = default;
             SqliteCommand cmd0 = DB.CreateCommand();
@@ -551,7 +641,7 @@ namespace MeatForward
                 if (!r.HasRows) goto done;
                 while (r.Read())
                 {
-                    yield return new channelStoreData().fillFromCurrentRow(r).fetchOverwrites(this);
+                    yield return new channelRecord().fillFromCurrentRow(r).fetchOverwrites(this);
                 }
             }
             finally { r?.Close(); }

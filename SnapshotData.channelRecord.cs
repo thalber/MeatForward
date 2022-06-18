@@ -6,7 +6,7 @@ namespace MeatForward
 {
     internal partial class SnapshotData
     {
-        public record struct channelRecord : IAmDataRow<channelRecord>, IEquatable<channelRecord>
+        public record struct channelRecord : IAmDataRow<channelRecord>, IEquatable<channelRecord>, IHaveExtraSnapshotData<channelRecord>
         {
             public string name;
             public Discord.ChannelType? type;
@@ -56,17 +56,14 @@ namespace MeatForward
                     );
             }
 
-            //public override bool Equals([NotNullWhen(true)] object? obj)
-            //{
-            //    return (obj as channelRecord?)?.Equals(this) ?? base.Equals(obj);
-            //}
-
-            public channelRecord fetchOverwrites(SnapshotData sn)
+            public channelRecord fetchAdditionalData(SnapshotData sd)
             {
-                this.permOverwrites = sn.GetOverwrites(this.internalID);
+                this.permOverwrites = sd.GetOverwrites(this.internalID);
                 //Console.WriteLine($"SCROM@: {this.name}, {permOverwrites.Count()}");
                 return this;
             }
+
+            
             public channelRecord fillFromCurrentRow(SqliteDataReader r)
             {
                 this.type = (Discord.ChannelType?)r.GetInt32(r.GetOrdinal("TYPE"));

@@ -40,7 +40,10 @@ namespace MeatForward
                     }
                 }
 
-                _client = new DiscordSocketClient();
+                _client = new DiscordSocketClient(new DiscordSocketConfig()
+                {
+                    GatewayIntents = GatewayIntents.All
+                });
                 _client.Log += (msg) => {
                     Console.WriteLine(msg);
                     return Task.CompletedTask;
@@ -82,7 +85,7 @@ namespace MeatForward
             SocketGuild? guild;
             SocketGuild[] allguilds = _client.Guilds.ToArray();
             SnapshotData.SnapshotProperties props = default;
-            await _client.SetActivityAsync(new MeatActivity() { aname = "the pink mist pass by", desc = "" });
+            await _client.SetActivityAsync(new MeatActivity() { aname = "the pink mist pass by", desc = "", atype = ActivityType.Watching });
             
             Console.WriteLine();
             Console.WriteLine($"Current snapshot: {_cSnap ?? "NULL!" as object}");
@@ -122,6 +125,11 @@ namespace MeatForward
                     }
                 case "capture":
                     {
+                        RequestOptions rqp = new()
+                        {
+                            AuditLogReason = "Snapshot update",
+                            RetryMode = RetryMode.AlwaysRetry
+                        };
                         if (_cSnap is null)
                         {
                             Console.WriteLine("no snapshot to capture to!");
@@ -133,8 +141,9 @@ namespace MeatForward
                             Console.WriteLine("Not in target guild!");
                             break;
                         }
-                        //var users = guild.DownloadUsersAsync();
-                        //var bans = guild.GetBansAsync();
+                        var usersDownload = guild.DownloadUsersAsync();
+                        var bans = guild.GetBansAsync();
+                        //TODO: add ban records
                         foreach (var role in guild.Roles)
                         {
                             _cSnap.SetRoleData(role.Id, role.getRecord());
@@ -143,15 +152,36 @@ namespace MeatForward
                         {
                             _cSnap.SetChannelData(channel.Id, channel.getRecord());
                         }
+                        await usersDownload;
+                        Console.WriteLine("! Recording users!! count: " + guild.Users.Count());
+                        foreach (SocketGuildUser? u in guild.Users)
+                        {
+                            try
+                            {
+                                var rec = u.getRecord();
+#warning mruowing out (revise)
+                                System.Diagnostics.Debug.WriteLine(rec.attachedRoles.Count());
+                                rec.attachedRoles = _cSnap.joinRolesWithInternalIDs(rec.NIds);
+                                System.Diagnostics.Debug.WriteLine(rec.attachedRoles.Count());
+                                _cSnap.setUserData(u.Id, rec);
+                            }
+                            catch (Exception ex)
+                            {
+                                Console.WriteLine($"Error recording user {u.Username} : {ex}");
+                            }
+                            
+                        }
+                        await foreach (var banGroup in bans)
+                        {
+                            foreach (var ban in banGroup)
+                            {
+                                _cSnap.setUserData(ban.User.Id, ban.getUserRecord());
+                            }
+                        }
+
                         //trimming is no longer fucked :3
                         _cSnap.trimChannels(guild.Channels.Select(xx => xx.Id), true);
                         _cSnap.trimRoles(guild.Roles.Select(xx => xx.Id), true);
-
-                        //await users;
-                        //foreach (var u in guild.Users)
-                        //{
-
-                        //}
                     }
                     //todo: users
                     _cSnap.props.creationDate = DateTime.UtcNow;

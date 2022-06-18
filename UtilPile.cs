@@ -30,7 +30,7 @@ namespace MeatForward
                 (channel as ITextChannel)?.IsNsfw ?? false,
                 (channel as ITextChannel)?.SlowModeInterval,
                 channel.Position,
-                ows ?? channel.PermissionOverwrites);
+                ows ?? ((channel is IThreadChannel tr) ? default(IEnumerable<Overwrite>) : channel.PermissionOverwrites));
             return data;
         }
 
@@ -40,12 +40,19 @@ namespace MeatForward
 
             return res;
         }
+        internal static SnapshotData.userRecord getRecord(this Discord.WebSocket.SocketGuildUser user)
+        {
+            return new SnapshotData.userRecord(user.Id,
+                null,
+                false,
+                user.DisplayName,
+                user.Roles.Select(x => (default(int), x.Id)));
+        }
+        internal static SnapshotData.userRecord getUserRecord(this IBan ban)
+        {
+            return new SnapshotData.userRecord(ban.User.Id, ban.Reason, true, null, new List<(int, ulong)>());
+        }
 
-//        internal static SnapshotData.userRecord getRecord(this Discord.IUser user)
-//        {
-//#error impl
-//            throw new NotImplementedException();
-//        }
         internal static bool contentsEqual<T>(this IEnumerable<T> src, IEnumerable<T> other, Func<T, T, bool> comPred)
         {
             if (src is null || other is null) return false;
@@ -130,7 +137,7 @@ namespace MeatForward
 
     internal class tableTemplate : IEnumerable<columnHeaderInfo>
     {
-        private List<columnHeaderInfo> columns = new();
+        public List<columnHeaderInfo> columns = new();
         public void Add(string name, ColumnMods mode, SqliteType tp)
         {
             columns.Add(new columnHeaderInfo(name, mode, tp));

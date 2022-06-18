@@ -46,6 +46,7 @@ namespace MeatForward
                     { "NATIVEID", ColumnMods.NotNull, SqliteType.Integer },
                     { "BANNED", ColumnMods.NotNull, SqliteType.Integer },
                     { "BANREASON", ColumnMods.None, SqliteType.Text },
+                    { "LOCALNAME", ColumnMods.None, SqliteType.Text },
                 } },
             { DB_Overwrites,
                 new()
@@ -66,7 +67,8 @@ namespace MeatForward
                     { "NSFW", ColumnMods.NotNull, SqliteType.Integer },
                     { "TOPIC", ColumnMods.None, SqliteType.Text },
                     { "CATID", ColumnMods.None, SqliteType.Integer },
-                    { "SLOWMODE", ColumnMods.NotNull, SqliteType.Integer }
+                    { "SLOWMODE", ColumnMods.NotNull, SqliteType.Integer },
+                    { "POSITION", ColumnMods.None, SqliteType.Integer },
                 } },
             {DB_RoleBindings,
                 new()
@@ -100,20 +102,33 @@ namespace MeatForward
                         System.Data.DataTable? schema = default;
                         cmdPokeTable.CommandText = $"SELECT * FROM {table};";
                         r0 = cmdPokeTable.ExecuteReader();//.GetSchemaTable();
-                        r0.Close();
                         schema = r0.GetSchemaTable();
-                        //
+                        r0.Close();
+                        //yo what it works????????
                         foreach (var templateColumn in template)
                         {
+                            //foreach (System.Data.DataColumn co in schema.Columns)
+                            //{
+                            //    Console.WriteLine(co.ColumnName);
+                            //}
                             System.Data.DataRow? tarRow = null;
                             foreach (System.Data.DataRow row in schema.Rows)
                             {
-                                if ((string)row["name"] == templateColumn.name) { tarRow = row; break; }
+                                if ((string)row["ColumnName"] == templateColumn.name) { tarRow = row; break; }
                             }
                             if (tarRow is null)
                             {
                                 cmdAddMissingColumns.CommandText = $"ALTER TABLE {table} " +
-                                    $"ADD ({templateColumn}";
+                                    $"ADD {templateColumn.getColumnDefString()}";
+                                try
+                                {
+                                    var r = cmdAddMissingColumns.ExecuteScalar();
+                                    Console.WriteLine($"Created missing column: {templateColumn.name}, {r}");
+                                }
+                                catch (SqliteException ex)
+                                {
+                                    Console.WriteLine($"Could not create column {templateColumn.name} in {table} ({ex}) ({cmdAddMissingColumns.CommandText})");
+                                }
                             }
                             //var ie = tableinfo.Rows as IEnumerable<object>;
                             //if (!tableinfo.Rows as IEnumerable<object>) { }// Get Any())
@@ -123,6 +138,22 @@ namespace MeatForward
                     catch (SqliteException ex)
                     {
                         Console.WriteLine($"Table {table} not found, creating");
+                        StringBuilder sb = new($"CREATE TABLE {table} (");
+                        foreach (var column in template)
+                        {
+                            sb.Append(column.getColumnDefString());
+                            sb.Append(", ");
+                        }
+                        sb.Length -= 2;
+                        sb.Append(")");
+                        cmdAddMissingColumns.CommandText = sb.ToString();
+                        try{
+                            cmdAddMissingColumns.ExecuteNonQuery();
+                        }
+                        catch (SqliteException ex1)
+                        {
+                            Console.WriteLine($"Could not recreate table {table} : {ex} ({cmdAddMissingColumns.CommandText})");
+                        }
                     }
                     finally { r0?.Close(); }
                 }
@@ -185,6 +216,7 @@ namespace MeatForward
         public void SetOverwrites(int channelid, IEnumerable<Discord.Overwrite> ows)
         {
             //todo: test
+            ows ??= new List<Discord.Overwrite>();
             SqliteDataReader? r = default;
             SqliteCommand cmd = DB.CreateCommand();
             cmd.CommandText = $"DELETE FROM {DB_Overwrites} WHERE CHANNELID={channelid};";
@@ -200,7 +232,7 @@ namespace MeatForward
                             $"PERMSALLOW, PERMSDENY) " +
                             $"VALUES " +
                             //#error check targets by internal IDs too
-                            $"({channelid}, {(int)ow.TargetType}, {getEntityInternalID(ow.TargetId, (ow.TargetType is Discord.PermissionTarget.Role) ? DB_Roles : DB_Users)}, " +
+                            $"({channelid}, {(int)ow.TargetType}, {getEntityInternalID(ow.TargetId, (ow.TargetType is Discord.PermissionTarget.Role) ? DB_Roles : DB_Users).Value}, " +
                             $"{ow.Permissions.AllowValue}, {ow.Permissions.DenyValue})";
                         cmd.ExecuteNonQuery();
                         Console.WriteLine($"Recorded permission overwrite to {channelid} for ({ow.TargetType}, {ow.TargetId})");
@@ -362,6 +394,7 @@ namespace MeatForward
         }
 
         #endregion
+
         #region channels
         public int? SetChannelData(ulong nativeid, channelRecord ch)
         {
@@ -467,7 +500,7 @@ namespace MeatForward
 
                 rdata.Read();
 
-                channelRecord res = new channelRecord().fillFromCurrentRow(rdata).fetchOverwrites(this);
+                channelRecord res = new channelRecord().fillFromCurrentRow(rdata).fetchAdditionalData(this);
                     //rdata.GetString(rdata.GetOrdinal("NAME")),
                     //(Discord.ChannelType)rdata.GetInt32(rdata.GetOrdinal("TYPE")),
                     //(ulong?)rdata.GetInt64(rdata.GetOrdinal("CATID")),
@@ -500,6 +533,77 @@ namespace MeatForward
         #endregion
 
         #region roles
+
+        public void SetRolesForUser(int userID, IEnumerable<int> roles)
+        {
+            bool none = roles.Count() == 0;
+            System.Diagnostics.Debug.WriteLine($"role set length : {roles.Count()}");
+            SqliteCommand cmd0 = DB.CreateCommand();
+            //SqliteDataReader r = default;
+            StringBuilder sb = new("(");
+            if (none) goto remove;
+            foreach (var role in roles) sb.Append($"{role}, ");
+            sb.Length -= 2;
+            sb.Append(")");
+        remove:
+            try
+            {
+                cmd0.CommandText = $"DELETE FROM {DB_RoleBindings} " +
+                $"WHERE USERID={userID} " +
+                (none ? ";" : $"AND ROLEID NOT IN {sb};");
+                Console.WriteLine($"Removed roles for {userID}: {cmd0.ExecuteNonQuery()}");
+                if (none) goto done;
+
+                var remaining = GetRolesForUser(userID).Select(x => x.internalID);
+                var toAdd = roles.SkipWhile(x => remaining.Contains(x));
+                if (toAdd.Count() == 0) goto done;
+                System.Diagnostics.Debug.WriteLine($"existing: {remaining.Count()}, toAdd: {toAdd.Count()}");
+                sb.Clear();
+                sb.Append($"INSERT INTO {DB_RoleBindings} (USERID, ROLEID) VALUES ");
+                foreach (var rta in toAdd)
+                {
+                    sb.Append($"({userID}, {rta}), ");
+                }
+                sb.Length -= 2;
+                sb.Append($"; -- {remaining}");
+                cmd0.CommandText = sb.ToString();
+                System.Diagnostics.Debug.WriteLine(cmd0.CommandText);
+                Console.WriteLine($"Added roles for {userID} : {cmd0.ExecuteNonQuery()}");
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error setting role bindings for user {userID}: {ex}");
+            }
+            finally
+            {
+
+            }
+        done:;
+        }
+        public IEnumerable<(int internalID, ulong nativeID)> GetRolesForUser(int id)
+        {
+            SqliteCommand cmd0 = DB.CreateCommand();
+            SqliteDataReader? r = default;
+            cmd0.CommandText = $"SELECT {DB_RoleBindings}.*, {DB_Roles}.NATIVEID " +
+                $"FROM {DB_RoleBindings} INNER JOIN {DB_Roles} ON {DB_RoleBindings}.ROLEID={DB_Roles}.ID " +
+                $"WHERE {DB_RoleBindings}.USERID={id}";
+            try
+            {
+                r = cmd0.ExecuteReader();
+                if (!r.HasRows) goto done;
+                while (r.Read())
+                {
+                    yield return (r.GetInt32(r.GetOrdinal("ROLEID")), (ulong)r.GetInt64(r.GetOrdinal("NATIVEID")));
+                }
+            }
+            finally
+            {
+                r?.Close();
+            }
+        done:
+            yield break;
+        }
+
         public int? SetRoleData(ulong nativeID, roleRecord rl)
         {
             bool alreadyKnown = false;
@@ -597,7 +701,6 @@ namespace MeatForward
         done:
             return res;
         }
-
         public void trimRoles(IEnumerable<ulong> nativeIDs, bool wl) 
             => trimRoles(nativeIDs.Select(xx => getEntityInternalID(xx, DB_Roles)).SkipWhile(xx => xx is null).Cast<int>(), wl);
 
@@ -605,6 +708,92 @@ namespace MeatForward
         {
             trimTable(IDs, DB_Roles, wl);
         }
+
+        #endregion
+
+        #region users
+
+        public userRecord? getUserData(int internalID)
+        {
+            userRecord? res = default;
+            SqliteCommand cmd0 = DB.CreateCommand();
+            SqliteDataReader? r = default;
+            cmd0.CommandText = $"SELECT * FROM {DB_Users} WHERE ID={internalID};";
+            try
+            {
+                r = cmd0.ExecuteReader(System.Data.CommandBehavior.SingleRow);
+                if (!r.HasRows) goto done;
+                res = new userRecord().fillFromCurrentRow(r).fetchAdditionalData(this);
+            }
+            catch (Exception ex)
+            {
+                Console.WriteLine($"Error retrieving data for {internalID} : {ex}");
+                goto done;
+            }
+            finally
+            {
+                r?.Close();
+            }
+        done:;
+            return res;
+        }
+
+        public int? setUserData(ulong nativeID, userRecord data)
+        {
+            Console.WriteLine($"Setting user record for {nativeID}, {data.localName}");
+            int? res = default;
+            bool alreadyKnown;
+            refreshRes();
+            SqliteCommand cmd0 = DB.CreateCommand();
+            SqliteDataReader? r = default;
+
+            var vals = data.postValues();
+            cmd0.CommandText = alreadyKnown
+                ? $"UPDATE {DB_Users} SET " +
+                $"NATIVEID={vals["NATIVEID"].val}, " +
+                $"BANNED={vals["BANNED"].val}, " +
+                $"BANREASON=$br, " +
+                $"LOCALNAME=$ln " +
+                $"WHERE ID={res.Value};"
+                : $"INSERT INTO {DB_Users} " +
+                $"(NATIVEID, BANNED, BANREASON, LOCALNAME) VALUES " +
+                $"({vals["NATIVEID"].val}, {vals["BANNED"].val}, $br, $ln)";
+            cmd0.Parameters.AddWithValue("$br", vals["BANREASON"].val);
+            cmd0.Parameters.AddWithValue("$ln", vals["LOCALNAME"].val);
+            try
+            {
+                Console.WriteLine($"Set user data for {nativeID} : {cmd0.ExecuteNonQuery()} (new: {!alreadyKnown})");
+                refreshRes();
+                SetRolesForUser(res.Value, data.IIds);
+                //SetRolesForUser()
+            }
+            catch (SqliteException ex)
+            {
+                Console.WriteLine($"Error recording user {nativeID} : {ex} ({cmd0.CommandText})");
+            }
+            finally
+            {
+                r?.Close();
+            }
+
+            return res;
+
+            void refreshRes()
+            {
+                try
+                {
+                    res = getEntityInternalID(nativeID, DB_Users);
+                    alreadyKnown = res is not null;
+                }
+                catch (ArgumentException aex)
+                {
+                    Console.WriteLine(aex);
+                    res = default;
+                    alreadyKnown = false;
+                }
+            }
+        }
+
         #endregion
 
         #region dispense
@@ -629,7 +818,6 @@ namespace MeatForward
             }
             done: yield break;
         }
-
         public IEnumerable<channelRecord> getAllChannelData()
         {
             SqliteDataReader? r = default;
@@ -641,7 +829,7 @@ namespace MeatForward
                 if (!r.HasRows) goto done;
                 while (r.Read())
                 {
-                    yield return new channelRecord().fillFromCurrentRow(r).fetchOverwrites(this);
+                    yield return new channelRecord().fillFromCurrentRow(r).fetchAdditionalData(this);
                 }
             }
             finally { r?.Close(); }
@@ -649,6 +837,44 @@ namespace MeatForward
 
             done:;
             yield break;
+        }
+
+        public IEnumerable<(int, ulong)> joinRolesWithInternalIDs(IEnumerable<ulong> natRoles)
+        {
+            List<(int, ulong)> res = new();
+            if (natRoles.Count() == 0) goto done;
+            SqliteCommand cmd0 = DB.CreateCommand();
+            SqliteDataReader? r = default;
+            StringBuilder sb = new($"SELECT * FROM {DB_Roles} WHERE NATIVEID IN (");
+            foreach (var nid in natRoles)
+            {
+                sb.Append($"{(long)nid}, ");
+            }
+            sb.Length -= 2;
+            sb.Append(");");
+            cmd0.CommandText = sb.ToString();
+            System.Diagnostics.Debug.WriteLine($"{cmd0.CommandText}");
+            try
+            {
+                r = cmd0.ExecuteReader();
+                if (!r.HasRows) { Console.WriteLine($"No roles found"); goto done; }
+                while (r.Read())
+                {
+                    roleRecord cr = new roleRecord().fillFromCurrentRow(r);
+                    res.Add((cr.internalId, cr.nativeid));
+                }
+            }
+            catch (SqliteException ex)
+            {
+                Console.WriteLine($"Error converting user roles: {ex}");
+                goto done;
+            }
+            finally
+            {
+                r?.Close();
+            }
+        done:;
+            return res;
         }
         #endregion
 

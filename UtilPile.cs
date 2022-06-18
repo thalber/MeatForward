@@ -45,12 +45,12 @@ namespace MeatForward
             return new SnapshotData.userRecord(user.Id,
                 null,
                 false,
-                user.DisplayName,
+                user.Username,
                 user.Roles.Select(x => (default(int), x.Id)));
         }
         internal static SnapshotData.userRecord getUserRecord(this IBan ban)
         {
-            return new SnapshotData.userRecord(ban.User.Id, ban.Reason, true, null, new List<(int, ulong)>());
+            return new SnapshotData.userRecord(ban.User.Id, ban.Reason, true, ban.User.Username, new List<(int, ulong)>());
         }
 
         internal static bool contentsEqual<T>(this IEnumerable<T> src, IEnumerable<T> other, Func<T, T, bool> comPred)

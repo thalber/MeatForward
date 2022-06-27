@@ -9,14 +9,14 @@ namespace MeatForward
 {
 
     //#error figure out if nullables work right (please god i hope they work right)
-#warning readd filtering
-#warning inefficient use of IO, revise
+    //todo: readd filtering
+    //todo: inefficient use of IO, revise
     internal partial class SnapshotData
     {
+        #region table headers
         //id (int) : nativeid(int) : name (text) : color (int) : hoist (bool) : ment (bool)
         internal const string DB_Roles = "Roles";
         //nativeid (int)
-        //todo: figure out how to deal with roles
         internal const string DB_Users = "Users";
         //id (int) : nativeid (int) : name (text) : topic (string) : type()
         internal const string DB_Channels = "Channels";
@@ -28,6 +28,7 @@ namespace MeatForward
 
         internal readonly static Dictionary<string, tableTemplate> tableTemplates = new()
         {
+            //ID fields are read as Int32s, NativeIDs as Int64 -> UInt64
             { DB_Roles,
                 new()
                 {
@@ -44,6 +45,7 @@ namespace MeatForward
                 {
                     { "ID", ColumnMods.PrimeKey | ColumnMods.Autoincrement, SqliteType.Integer },
                     { "NATIVEID", ColumnMods.NotNull, SqliteType.Integer },
+                    //bool
                     { "BANNED", ColumnMods.NotNull, SqliteType.Integer },
                     { "BANREASON", ColumnMods.None, SqliteType.Text },
                     { "LOCALNAME", ColumnMods.None, SqliteType.Text },
@@ -51,6 +53,7 @@ namespace MeatForward
             { DB_Overwrites,
                 new()
                 {
+                    //internal channel id
                     { "CHANNELID", ColumnMods.NotNull, SqliteType.Integer },
                     { "TARGETTYPE", ColumnMods.NotNull, SqliteType.Integer },
                     { "TARGETID", ColumnMods.NotNull, SqliteType.Integer },
@@ -64,11 +67,14 @@ namespace MeatForward
                     { "NATIVEID", ColumnMods.NotNull, SqliteType.Integer },
                     { "NAME", ColumnMods.NotNull, SqliteType.Text },
                     { "TYPE", ColumnMods.None, SqliteType.Integer },
+                    //bool
                     { "NSFW", ColumnMods.NotNull, SqliteType.Integer },
                     { "TOPIC", ColumnMods.None, SqliteType.Text },
-                    { "CATID", ColumnMods.None, SqliteType.Integer },
+                    //parent id: category for everything except threads, parent text channel for threads, null for categories
+                    { "PARENT", ColumnMods.None, SqliteType.Integer },
                     { "SLOWMODE", ColumnMods.NotNull, SqliteType.Integer },
                     { "POSITION", ColumnMods.None, SqliteType.Integer },
+                    //{ "PARENT", ColumnMods.None, SqliteType.Integer }
                 } },
             {DB_RoleBindings,
                 new()
@@ -77,6 +83,8 @@ namespace MeatForward
                     { "USERID", ColumnMods.NotNull, SqliteType.Integer }
                 } }
         };
+        #endregion
+
         /// <summary>
         /// run *once*
         /// </summary>
@@ -331,6 +339,29 @@ namespace MeatForward
         /// <returns>resulting internal ID, null if failure</returns>
 
         #region idutils
+
+        public ulong? getEntityNativeID(int InternalID, string tablename)
+        {
+            if (!withIds.Contains(tablename)) throw new ArgumentException($"INVALID TABLE {tablename}");
+            ulong? res = default;
+            SqliteCommand cmd0 = DB.CreateCommand();
+            SqliteDataReader r = default;
+            cmd0.CommandText = $"SELECT NATIVEID FROM {tablename} WHERE ID={InternalID};";
+            try
+            {
+                r = cmd0.ExecuteReader(System.Data.CommandBehavior.SingleRow);
+                res = (ulong)r.GetInt64(0);
+            }
+            catch (SqliteException ex)
+            {
+                Console.WriteLine($"Error retrieving nativeid from {tablename}: {ex}");
+            }
+            finally
+            {
+                r?.Close();
+            }
+            return res;
+        }
         public int? getEntityInternalID(ulong nativeID, string tablename)
         {
             if (!withIds.Contains(tablename)) throw new ArgumentException($"INVALID TABLE {tablename}!");
@@ -366,7 +397,7 @@ namespace MeatForward
         {
             if (!withIds.Contains(tablename)) throw new ArgumentException("Invalid table!");
             SqliteCommand cmd0 = DB.CreateCommand();
-            if (!idList.Any()) { if (!whitelist) return; cmd0.CommandText = "DELETE FROM "; goto exec; }
+            if (!idList.Any()) { if (!whitelist) return; cmd0.CommandText = $"DELETE FROM {tablename}"; goto exec; }
             StringBuilder sb = new($"DELETE FROM {tablename} WHERE ID ");
             if (whitelist) sb.Append("NOT ");
             sb.Append("IN (");
@@ -419,7 +450,7 @@ namespace MeatForward
                     ? $"UPDATE {DB_Channels} " +
                     $"SET NAME=$chname, " +
                     $"TYPE={vals["TYPE"].val}, " +
-                    $"CATID={vals["CATID"].val}, " +
+                    $"PARENT={vals["PARENT"].val}, " +
                     $"TOPIC=$chtopic, " +
                     $"NSFW={vals["NSFW"].val}, " +
                     $"SLOWMODE={vals["SLOWMODE"].val}," +
@@ -427,9 +458,9 @@ namespace MeatForward
                     $"WHERE ID={res} "
                     //or create new record
                     : $"INSERT INTO {DB_Channels} " +
-                    $"(NAME, NATIVEID, TYPE, CATID, TOPIC, NSFW, SLOWMODE, POSITION) " +
+                    $"(NAME, NATIVEID, TYPE, PARENT, TOPIC, NSFW, SLOWMODE, POSITION) " +
                     $"VALUES " +
-                    $"($chname, {nativeid}, {vals["TYPE"].val}, {vals["CATID"].val}, $chtopic, {vals["NSFW"].val}, {vals["SLOWMODE"].val}, {vals["POSITION"].val})";
+                    $"($chname, {nativeid}, {vals["TYPE"].val}, {vals["PARENT"].val}, $chtopic, {vals["NSFW"].val}, {vals["SLOWMODE"].val}, {vals["POSITION"].val})";
                 //cmd1.Parameters.AddWithValue("$chname", ch.name);
                 //cmd1.Parameters.AddWithValue("$chtopic", ch.topic);
                 cmd1.Parameters.AddWithValue("$chname", vals["NAME"].val);
@@ -441,15 +472,12 @@ namespace MeatForward
 
                 if (!chTest.Equals(ch))
                 {
-                    Console.WriteLine($"Added channel record, recording overwrites... {cmd1.CommandText}");
                     cmd1.ExecuteNonQuery();
                     refreshRes();
+                    Console.WriteLine($"Added channel record {ch.name}, recording overwrites... {cmd1.CommandText}");
                     SetOverwrites(res.Value, ch.permOverwrites);
                 }
                 else Console.WriteLine("Channel data identical, skipping");
-
-                
-
                 //SetOverwrites()
                 //foreach ()
             }
@@ -525,7 +553,7 @@ namespace MeatForward
 
         //gross
         public void trimChannels(IEnumerable<ulong> nativeIDs, bool wl)
-            => trimChannels(nativeIDs.Select(xx => getEntityInternalID(xx, DB_Channels)).SkipWhile(xx => xx is null).Cast<int>(), wl);
+            => trimChannels(nativeIDs.Select(xx => getEntityInternalID(xx, DB_Channels)).TakeWhile(xx => xx.HasValue).Select(xx => xx.Value), wl);
         public void trimChannels (IEnumerable<int> IDs, bool wl)
         {
             trimTable(IDs, DB_Channels, wl);

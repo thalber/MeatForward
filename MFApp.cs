@@ -1,7 +1,12 @@
-﻿using Discord.WebSocket;
+﻿//i finish this
+//and then i round up
+
+using Discord.WebSocket;
 using Discord;
 using Discord.Rest;
+using System.Diagnostics;
 
+//using static System.Diagnostics.Debug;
 using static MeatForward.ConsoleFace;
 using static MeatForward.SnapshotData;
 
@@ -13,11 +18,21 @@ namespace MeatForward
         private static DiscordSocketClient? _client;
         private static SnapshotData? _cSnap;
         private static SemaphoreSlim exitMark = new(0, 1);
+
+        private static ChannelType[] CT_Order = new[]
+        {
+            ChannelType.Category,
+            ChannelType.Text,
+            ChannelType.Voice,
+            ChannelType.Stage,
+            ChannelType.PublicThread,
+            ChannelType.PrivateThread,
+        };
         //private static string _csnapJson 
         //    => _cSnap is not null 
         //    ? Newtonsoft.Json.JsonConvert.SerializeObject(_cSnap.props, Newtonsoft.Json.Formatting.Indented) 
         //    : "NULL";
-        private static string? defaultFilepath;
+        
 
         static async Task<int> Main(string[] args)
         {
@@ -25,20 +40,20 @@ namespace MeatForward
             try
             {
                 
-                for (int i = 0; i < args.Length; i++)
-                {
-                    var spl = args[i].Split('=', StringSplitOptions.RemoveEmptyEntries);
-                    var pname = spl.ElementAtOrDefault(0);
-                    var pct = spl.ElementAtOrDefault(1);
-                    switch (pname)
-                    {
-                        //todo: expand?
-                        case "-fp":
-                        case "--filepath":
-                            defaultFilepath = pct;
-                            break;
-                    }
-                }
+                //for (int i = 0; i < args.Length; i++)
+                //{
+                //    var spl = args[i].Split('=', StringSplitOptions.RemoveEmptyEntries);
+                //    var pname = spl.ElementAtOrDefault(0);
+                //    var pct = spl.ElementAtOrDefault(1);
+                //    switch (pname)
+                //    {
+                //        //todo: expand?
+                //        case "-fp":
+                //        case "--filepath":
+                //            defaultFilepath = pct;
+                //            break;
+                //    }
+                //}
 
                 _client = new DiscordSocketClient(new DiscordSocketConfig()
                 {
@@ -77,7 +92,7 @@ namespace MeatForward
             }
         }
 
-        //todo: user role caching
+        //todo: user role caching test, reapply impl
         public static async void RunMainLoop()
         {
         mainLoop:
@@ -93,6 +108,7 @@ namespace MeatForward
                 new[] { "create", "capture", "rollback", "open", "close", "props", "send", "backup", "exit" },
                 true);
             //main loop
+            //todo: save and restore in order: cats -> channels -> threads
             switch (r)
             {
                 case "create":
@@ -148,21 +164,27 @@ namespace MeatForward
                         {
                             _cSnap.SetRoleData(role.Id, role.getRecord());
                         }
-                        foreach (var channel in guild.Channels)
+#warning doesn't work; change to specific channel set props
+                        foreach (var ct in CT_Order)
                         {
-                            _cSnap.SetChannelData(channel.Id, channel.getRecord());
+                            Console.WriteLine($" ? Archiving {ct} channels...");
+                            foreach (var channel in guild.Channels.TakeWhile(xx => xx.GetChannelType().HasValue && xx.GetChannelType().Value == ct))
+                            {
+                                _cSnap.SetChannelData(channel.Id, channel.getRecord().fetchAdditionalData(_cSnap)
+                                    /*needed because janky internal/native transitions*/);
+                            }
                         }
                         await usersDownload;
-                        Console.WriteLine("! Recording users!! count: " + guild.Users.Count());
+                        Console.WriteLine("! Recording users!! count: " + guild.Users.Count);
                         foreach (SocketGuildUser? u in guild.Users)
                         {
                             try
                             {
                                 var rec = u.getRecord();
-#warning mruowing out (revise)
-                                System.Diagnostics.Debug.WriteLine(rec.attachedRoles.Count());
+                                //todo: revise the whole role binding process
+                                Console.WriteLine(rec.attachedRoles.Count());
                                 rec.attachedRoles = _cSnap.joinRolesWithInternalIDs(rec.NIds);
-                                System.Diagnostics.Debug.WriteLine(rec.attachedRoles.Count());
+                                Console.WriteLine(rec.attachedRoles.Count());
                                 _cSnap.setUserData(u.Id, rec);
                             }
                             catch (Exception ex)
@@ -180,6 +202,7 @@ namespace MeatForward
                         }
 
                         //trimming is no longer fucked :3
+                        //trimming is once again fucked
                         _cSnap.trimChannels(guild.Channels.Select(xx => xx.Id), true);
                         _cSnap.trimRoles(guild.Roles.Select(xx => xx.Id), true);
                     }
@@ -218,13 +241,13 @@ namespace MeatForward
                             }
                         }
 
-                        foreach (var rt in restoreRoleTasks)
+                        foreach (var (record, t) in restoreRoleTasks)
                         {
                             try
                             {
-                                var rl = await rt.t;
+                                var rl = await t;
                                 _cSnap.updateEntityNativeID(DB_Roles,
-                                rt.record.internalId, rl.Id);
+                                record.internalId, rl.Id);
                             }
                             catch (Exception ex)
                             {
@@ -240,78 +263,92 @@ namespace MeatForward
                         if (!recreateMissingChannels) goto restoreRolePerms;
                         //Console.WriteLine("! restoring");
                         List<(channelRecord record, Task t)> restoreChannelTasks = new();
+                        var allChannels = _cSnap.getAllChannelData().ToArray();
                         Console.WriteLine("! Recreating missing channels...");
-                        foreach (var record in _cSnap.getAllChannelData())
+
+                        foreach (var ct in CT_Order)
                         {
-                            if (!guild.Channels.Any(ch => ch.Id == record.nativeid))
+                            Console.WriteLine($"? Restoring {ct} channels...");
+                            foreach (var record in allChannels.TakeWhile(xx => xx.type == ct))
                             {
-                                Console.WriteLine($"Channel {record.name} : {record.internalID} (previously {record.nativeid}) not found. Queueing up recreation");
-                                restoreChannelTasks.Add((record,
-                                    record.type switch
-                                    {
+                                if (!guild.Channels.Any(ch => ch.Id == record.nativeid))
+                                {
+                                    Console.WriteLine($"Channel {record.name} : {record.internalID} (previously {record.nativeid}) not found. Queueing up recreation");
+                                    restoreChannelTasks.Add((record,
+                                        record.type switch
+                                        {
                                         //todo: threads and category alignment
-                                        ChannelType.Voice => guild.CreateVoiceChannelAsync(record.name, ch =>
-                                        {
+                                            ChannelType.Voice => guild.CreateVoiceChannelAsync(record.name, ch =>
+                                            {
                                             //ch.PermissionOverwrites = record.permOverwrites;
-                                            ch.CategoryId = record.categoryId;
-                                            ch.Position = record.position is null or 0
-                                            ? new()
-                                            : new(record.position.Value);
-                                        },
-                                        rqp),
-                                        ChannelType.Category => guild.CreateCategoryChannelAsync(record.name, ch =>
-                                        {
+                                                ch.CategoryId = record.parentNativeID;
+                                                ch.Position = record.position is null or 0
+                                                ? new()
+                                                : new(record.position.Value);
+                                            },
+                                            rqp),
+                                            (ChannelType.PrivateThread or ChannelType.PublicThread) when guild.GetChannel(record.parentNativeID ?? default) is SocketTextChannel tc 
+                                            => tc.CreateThreadAsync(
+                                                name: record.name,
+                                                type: record.type is ChannelType.PublicThread ? ThreadType.PublicThread : ThreadType.PrivateThread,
+                                                options: rqp),
+                                            ChannelType.Category => guild.CreateCategoryChannelAsync(record.name, ch =>
+                                            {
                                             //ch.PermissionOverwrites = record.permOverwrites;
-                                            ch.Position = record.position is null or 0
-                                            ? new() 
-                                            : new(record.position.Value);
-                                        }, 
-                                        rqp),
-                                        ChannelType.Text or _ => guild.CreateTextChannelAsync(record.name, ch =>
-                                        {
+                                                ch.Position = record.position is null or 0
+                                                ? new()
+                                                : new(record.position.Value);
+                                            },
+                                            rqp),
+                                            ChannelType.Text or _ => guild.CreateTextChannelAsync(record.name, ch =>
+                                            {
                                             //ch.PermissionOverwrites = record.permOverwrites;
-                                            ch.Topic = record.topic;
-                                            
-                                            ch.CategoryId = record.categoryId;
-                                            ch.IsNsfw = record.isNsfw;
-                                            ch.SlowModeInterval = record.slowModeInterval is 0 or null
-                                            ? new()
-                                            : new(record.slowModeInterval.Value);
-                                            ch.Position = record.position is null or 0
-                                            ? new()
-                                            : new(record.position.Value);
-                                        }, 
-                                        rqp)
-                                    }));
-                            }
-                        }
+                                                ch.Topic = record.topic;
 
-                        foreach (var ct in restoreChannelTasks)
-                        {
-                            try
-                            {
-                                await ct.t;
-                                var ct_text = ct.t as Task<RestTextChannel>;
-                                var ct_voice = ct.t as Task<RestVoiceChannel>;
-                                var ct_cat = ct.t as Task<RestCategoryChannel>;
-                                IChannel? result = ct_text?.Result ?? ct_voice?.Result ?? ct_cat?.Result as IChannel;
-                                if (result is null) {
-                                    Console.WriteLine($"Unexpected null result in channel restore! " +
-                                        $"Skipping {ct.record.name}({ct.record.internalID})");
-                                    continue;
+                                                ch.CategoryId = record.parentNativeID;
+                                                ch.IsNsfw = record.isNsfw;
+                                                ch.SlowModeInterval = record.slowModeInterval is 0 or null
+                                                ? new()
+                                                : new(record.slowModeInterval.Value);
+                                                ch.Position = record.position is null or 0
+                                                ? new()
+                                                : new(record.position.Value);
+                                            },
+                                            rqp)
+                                        }));
                                 }
-                                _cSnap.updateEntityNativeID(DB_Channels, ct.record.internalID, result.Id);
+                            }
 
-                            }
-                            catch (Exception ex)
+                            foreach (var (record, t) in restoreChannelTasks)
                             {
-                                Console.WriteLine($"Error recreating channel {ct.record.name} ({ct.record.internalID}): {ex}");
-                                errc++;
+                                try
+                                {
+                                    await t;
+                                    var ct_text = t as Task<RestTextChannel>;
+                                    var ct_voice = t as Task<RestVoiceChannel>;
+                                    var ct_cat = t as Task<RestCategoryChannel>;
+                                    var ct_thr = t as Task<SocketThreadChannel>;
+                                    IChannel? result = ct_text?.Result ?? ct_voice?.Result ?? ct_cat?.Result ?? ct_thr?.Result as IChannel;
+                                    if (result is null)
+                                    {
+                                        Console.WriteLine($"Unexpected null result in channel restore! " +
+                                            $"Skipping {record.name}({record.internalID})");
+                                        continue;
+                                    }
+                                    _cSnap.updateEntityNativeID(DB_Channels, record.internalID, result.Id);
+                                    
+
+                                }
+                                catch (Exception ex)
+                                {
+                                    Console.WriteLine($"Error recreating channel {record.name} ({record.internalID}): {ex}");
+                                    errc++;
+                                }
                             }
+                            Console.WriteLine($"Ran {restoreChannelTasks.Count} channel restore tasks; errors : {errc}");
+                            errc = 0;
+                            restoreChannelTasks.Clear();
                         }
-                        Console.WriteLine($"Ran {restoreChannelTasks.Count} channel restore tasks; errors : {errc}");
-                        errc = 0;
-                        restoreChannelTasks.Clear();
 
                     restoreRolePerms:;
                         List<(roleRecord record, Task t)> restoreRolePermTasks = new();
@@ -334,15 +371,15 @@ namespace MeatForward
                             rqp)));
                             }
                         }
-                        foreach (var rpt in restoreRolePermTasks)
+                        foreach (var (record, t) in restoreRolePermTasks)
                         {
                             try
                             {
-                                await rpt.t;
+                                await t;
                             }
                             catch (Exception ex)
                             {
-                                Console.WriteLine($"Error restoring role perms for {rpt.record.name} ({rpt.record.nativeid}): {ex}");
+                                Console.WriteLine($"Error restoring role perms for {record.name} ({record.nativeid}): {ex}");
                                 errc++;
                             }
                         }
@@ -371,15 +408,15 @@ namespace MeatForward
                                 rqp)));
                             }
                         }
-                        foreach (var cprt in restoreChannelPermTasks)
+                        foreach (var (record, t) in restoreChannelPermTasks)
                         {
                             try
                             {
-                                await cprt.t;
+                                await t;
                             }
                             catch (Exception ex)
                             {
-                                Console.WriteLine($"Error restoring permissions for channel {cprt.record.name} ({cprt.record.nativeid} : {ex}");
+                                Console.WriteLine($"Error restoring permissions for channel {record.name} ({record.nativeid} : {ex}");
                                 errc++;
                             }
                         }

@@ -15,8 +15,9 @@ namespace MeatForward
     internal static class UtilPile
     {
         internal static bool IndexInRange<T>(this T[] arr, int index) => index > -1 && index < arr.Length;
-        internal static ulong? getCatID (this Discord.WebSocket.SocketGuildChannel ch)
+        internal static ulong? getParent (this Discord.WebSocket.SocketGuildChannel ch)
         {
+            if (ch is Discord.WebSocket.SocketThreadChannel th) return th.ParentChannel.Id;
             foreach (var cat in ch.Guild.CategoryChannels) if (cat.Channels.Contains(ch)) return cat.Id;
             return null;
         }
@@ -25,12 +26,12 @@ namespace MeatForward
             SnapshotData.channelRecord data = new(channel.Id,
                 channel.Name,
                 channel.GetChannelType(),
-                channel.getCatID(),
+                channel.getParent(),
                 (channel as ITextChannel)?.Topic,
                 (channel as ITextChannel)?.IsNsfw ?? false,
                 (channel as ITextChannel)?.SlowModeInterval,
                 channel.Position,
-                ows ?? ((channel is IThreadChannel tr) ? default(IEnumerable<Overwrite>) : channel.PermissionOverwrites));
+                ows ?? (channel is not IThreadChannel ? channel.PermissionOverwrites : default(IEnumerable<Overwrite>)));
             return data;
         }
 

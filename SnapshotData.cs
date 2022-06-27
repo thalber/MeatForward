@@ -45,10 +45,10 @@ namespace MeatForward
             DB.Close();
             DB.Open();
         }
-        public void Reconnect()
-        {
-#warning impl
-        }
+//        public void Reconnect()
+//        {
+//#warning impl
+//        }
         public void Close()
         {
             DB?.Close();

@@ -80,7 +80,7 @@ namespace MeatForward
                 this.type = (Discord.ChannelType?)r.GetInt32(r.GetOrdinal("TYPE"));
                 this.name = r.GetString(r.GetOrdinal("NAME"));
                 this.parentInternalID = r.IsDBNull(r.GetOrdinal("PARENT")) ? null : r.GetInt32(r.GetOrdinal("PARENT"));
-                this.topic = r.GetString(r.GetOrdinal("TOPIC"));
+                this.topic = r.IsDBNull(r.GetOrdinal("TOPIC")) ? null : r.GetString(r.GetOrdinal("TOPIC"));
                 this.internalID = r.GetInt32(r.GetOrdinal("ID"));
                 this.isNsfw = r.GetInt32(r.GetOrdinal("NSFW")) == 1;
                 this.slowModeInterval = r.GetInt32(r.GetOrdinal("SLOWMODE"));

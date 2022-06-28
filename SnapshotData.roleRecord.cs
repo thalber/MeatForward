@@ -28,15 +28,15 @@ namespace MeatForward
                 this.nativeid = nativeid;
             }
 
-            //public bool Equals(roleRecord other)
-            //{
-            //    return this.col?.RawValue == other.col?.RawValue
-            //        && this.hoist == other.hoist
-            //        && this.ment == other.ment
-            //        && this.perms == other.perms
-            //        && this.name == other.name
-            //        && this.nativeid == other.nativeid;
-            //}
+            public bool Equals(roleRecord other)
+            {
+                return this.col?.RawValue == other.col?.RawValue
+                    && this.hoist == other.hoist
+                    && this.ment == other.ment
+                    && this.perms == other.perms
+                    && this.name == other.name
+                    && this.nativeid == other.nativeid;
+            }
 
             //public override bool Equals([NotNullWhen(true)] object? obj)
             //{

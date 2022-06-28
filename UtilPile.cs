@@ -21,6 +21,8 @@ namespace MeatForward
             foreach (var cat in ch.Guild.CategoryChannels) if (cat.Channels.Contains(ch)) return cat.Id;
             return null;
         }
+
+
         internal static SnapshotData.channelRecord getRecord(this Discord.WebSocket.SocketGuildChannel channel, IEnumerable<Overwrite>? ows = null)
         {
             SnapshotData.channelRecord data = new(channel.Id,
@@ -61,10 +63,8 @@ namespace MeatForward
             bool res = true;
             IEnumerator<T> srcen = src.GetEnumerator(),
                 othen = other.GetEnumerator();
-            while (srcen.MoveNext())
+            while (srcen.MoveNext() && othen.MoveNext())
             {
-                othen.MoveNext();
-
                 res &= comPred(srcen.Current, othen.Current);
             }
 

@@ -223,7 +223,6 @@ namespace MeatForward
         /// <param name="ows"></param>
         public void SetOverwrites(int channelid, IEnumerable<Discord.Overwrite> ows)
         {
-            //todo: test
             ows ??= new List<Discord.Overwrite>();
             SqliteDataReader? r = default;
             SqliteCommand cmd = DB.CreateCommand();
@@ -346,13 +345,15 @@ namespace MeatForward
             ulong? res = default;
             SqliteCommand cmd0 = DB.CreateCommand();
             SqliteDataReader r = default;
-            cmd0.CommandText = $"SELECT NATIVEID FROM {tablename} WHERE ID={InternalID};";
+            cmd0.CommandText = $"SELECT * FROM {tablename} WHERE ID={InternalID}";
             try
             {
                 r = cmd0.ExecuteReader(System.Data.CommandBehavior.SingleRow);
-                res = (ulong)r.GetInt64(0);
+                if (!r.HasRows) goto done;
+                r.Read();
+                res = (ulong)r.GetInt64(r.GetOrdinal("NATIVEID"));
             }
-            catch (SqliteException ex)
+            catch (Exception ex)
             {
                 Console.WriteLine($"Error retrieving nativeid from {tablename}: {ex}");
             }
@@ -360,6 +361,7 @@ namespace MeatForward
             {
                 r?.Close();
             }
+        done:;
             return res;
         }
         public int? getEntityInternalID(ulong nativeID, string tablename)
@@ -511,7 +513,6 @@ namespace MeatForward
         }
         public channelRecord? GetChannelData(int id)
         {
-            //todo: test
             SqliteDataReader? rdata = default, odata = default;
             SqliteCommand cmd0 = DB.CreateCommand(), cmd1 = DB.CreateCommand();
             //var ;

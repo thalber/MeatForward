@@ -28,6 +28,15 @@ namespace MeatForward
             ChannelType.PublicThread,
             ChannelType.PrivateThread,
         };
+
+        private static Type[] CT_Order_T = new[]
+        {
+            typeof(SocketCategoryChannel),
+            typeof(SocketTextChannel),
+            typeof(SocketVoiceChannel),
+            typeof(SocketStageChannel),
+            typeof(SocketThreadChannel),
+        };
         //private static string _csnapJson 
         //    => _cSnap is not null 
         //    ? Newtonsoft.Json.JsonConvert.SerializeObject(_cSnap.props, Newtonsoft.Json.Formatting.Indented) 
@@ -99,6 +108,7 @@ namespace MeatForward
             //inloop repeate use vars
             SocketGuild? guild;
             SocketGuild[] allguilds = _client.Guilds.ToArray();
+            SocketGuildUser user;
             SnapshotData.SnapshotProperties props = default;
             await _client.SetActivityAsync(new MeatActivity() { aname = "the pink mist pass by", desc = "", atype = ActivityType.Watching });
             
@@ -159,20 +169,38 @@ namespace MeatForward
                         }
                         var usersDownload = guild.DownloadUsersAsync();
                         var bans = guild.GetBansAsync();
+                        
                         //TODO: add ban records
                         foreach (var role in guild.Roles)
                         {
                             _cSnap.SetRoleData(role.Id, role.getRecord());
                         }
 #warning doesn't work; change to specific channel set props
+                        //why can't you just work i hate you
                         foreach (var ct in CT_Order)
                         {
-                            Console.WriteLine($" ? Archiving {ct} channels...");
-                            foreach (var channel in guild.Channels.TakeWhile(xx => xx.GetChannelType().HasValue && xx.GetChannelType().Value == ct))
+
+                            Func<object, SocketGuildChannel?> cdel = (s) =>
                             {
-                                _cSnap.SetChannelData(channel.Id, channel.getRecord().fetchAdditionalData(_cSnap)
-                                    /*needed because janky internal/native transitions*/);
-                            }
+                                return s as SocketGuildChannel;
+                            };
+                            var cset = ct switch
+                            {
+                                ChannelType.Text => guild.TextChannels.Select(cdel),
+                                ChannelType.Category => guild.CategoryChannels.Select(cdel),
+                                ChannelType.Stage => guild.StageChannels.Select(cdel),
+                                ChannelType.Voice => guild.VoiceChannels.Select(cdel),
+                                ChannelType.PublicThread or ChannelType.PrivateThread => guild.ThreadChannels.Select(cdel),
+                                _=> null
+                            };
+                            Console.WriteLine($" ? Archiving {ct} channels... ({cset?.Count()})");
+                            if (cset is not null)
+                                foreach (SocketGuildChannel? channel in cset)
+                                {
+                                    if (channel is null) continue;
+                                    _cSnap.SetChannelData(channel.Id, channel.getRecord().fetchAdditionalData(_cSnap)
+                                        /*needed because janky internal/native transitions*/);
+                                }
                         }
                         await usersDownload;
                         Console.WriteLine("! Recording users!! count: " + guild.Users.Count);
@@ -191,7 +219,6 @@ namespace MeatForward
                             {
                                 Console.WriteLine($"Error recording user {u.Username} : {ex}");
                             }
-                            
                         }
                         await foreach (var banGroup in bans)
                         {
@@ -215,6 +242,7 @@ namespace MeatForward
                         if (_cSnap is null) { Console.WriteLine("No snapshot open!"); break; }
                         guild = _client.GetGuild(_cSnap.props.guildID);
                         if (guild is null) { Console.WriteLine("Not in target guild!"); break; }
+                        user = guild.GetUser(_client.CurrentUser.Id);
                         RequestOptions rqp = new() { AuditLogReason = $"Automated rollback from {_cSnap.ToString()}", RetryMode = RetryMode.AlwaysRetry };
 
                         bool recreateMissingRoles = cPromptBinary("Recreate missing roles?"),
@@ -227,7 +255,8 @@ namespace MeatForward
                         List<(roleRecord record, Task<RestRole> t)> restoreRoleTasks = new();
                         foreach (var record in _cSnap.getAllRoleData())
                         {
-                            if (!guild.Roles.Any(r => r.Id == record.nativeid))
+                            var existing = guild.Roles.FirstOrDefault(r => r.Id == record.nativeid);
+                            if (existing is null)
                             {
                                 Console.WriteLine($"Role {Newtonsoft.Json.JsonConvert.SerializeObject(record)} not found. Queueing up recreation");
                                 restoreRoleTasks.Add(
@@ -353,6 +382,12 @@ namespace MeatForward
                     restoreRolePerms:;
                         List<(roleRecord record, Task t)> restoreRolePermTasks = new();
                         Console.WriteLine("! Restoring role perms...");
+                        if (!user.GuildPermissions.ManageRoles)
+                        {
+                            Console.WriteLine("Can't modify roles; aborting");
+                            goto restoreChannelPerms;
+                        }
+                        Func<SocketRole, int>? rolePosCmp = (SocketRole xx) => xx.Position;
                         foreach (var roleRecord in _cSnap.getAllRoleData())
                         {
                             var role = guild.Roles.FirstOrDefault(rl => rl.Id == roleRecord.nativeid);
@@ -360,6 +395,11 @@ namespace MeatForward
                             if (!role.getRecord().Equals(roleRecord))
                             {
                                 Console.WriteLine($"{role.Name}'s permissions do not match the record, updating...");
+                                if (user.Roles.Max(rolePosCmp) <= guild.Roles.Max(rolePosCmp))
+                                {
+                                    Console.WriteLine("Missing ability to modif");
+                                    continue;
+                                }
                                 restoreRolePermTasks.Add((roleRecord,
                                 role.ModifyAsync(rl => {
                                     rl.Permissions = new GuildPermissions(roleRecord.perms);

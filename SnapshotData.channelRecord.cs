@@ -86,7 +86,8 @@ namespace MeatForward
                 this.slowModeInterval = r.GetInt32(r.GetOrdinal("SLOWMODE"));
                 this.position = r.GetInt32(r.GetOrdinal("POSITION"));
                 this.nativeid = (ulong)r.GetInt64(r.GetOrdinal("NATIVEID"));
-                Console.WriteLine(JsonConvert.SerializeObject(this));
+                System.Diagnostics.Debug.WriteLine($"deser {this.name} :: {this.type}");
+                //Console.WriteLine(JsonConvert.SerializeObject(this));
                 return this;
             }
 

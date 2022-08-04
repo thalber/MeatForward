@@ -115,7 +115,7 @@ namespace MeatForward
             Console.WriteLine();
             Console.WriteLine($"Current snapshot: {_cSnap ?? "NULL!" as object}");
             var r = cPrompt("Select needed action: ",
-                new[] { "create", "capture", "rollback", "open", "close", "props", "send", "backup", "exit" },
+                new[] { "create", "capture", "rollback", "open", "close", "props", "send", "backup", "testeq", "exit" },
                 true);
             //main loop
             //todo: save and restore in order: cats -> channels -> threads
@@ -175,7 +175,6 @@ namespace MeatForward
                         {
                             _cSnap.SetRoleData(role.Id, role.getRecord());
                         }
-#warning doesn't work; change to specific channel set props
                         //why can't you just work i hate you
                         foreach (var ct in CT_Order)
                         {
@@ -258,7 +257,7 @@ namespace MeatForward
                             var existing = guild.Roles.FirstOrDefault(r => r.Id == record.nativeid);
                             if (existing is null)
                             {
-                                Console.WriteLine($"Role {Newtonsoft.Json.JsonConvert.SerializeObject(record)} not found. Queueing up recreation");
+                                Console.WriteLine($"Role {record.name} ({record.nativeid}) not found. Queueing up recreation");
                                 restoreRoleTasks.Add(
                                     (record, 
                                     guild.CreateRoleAsync (record.name,
@@ -293,37 +292,40 @@ namespace MeatForward
                         //Console.WriteLine("! restoring");
                         List<(channelRecord record, Task t)> restoreChannelTasks = new();
                         var allChannels = _cSnap.getAllChannelData().ToArray();
-                        Console.WriteLine("! Recreating missing channels...");
+                        Console.WriteLine($"! Recreating missing channels... total records: {allChannels.Count()}");
 
                         foreach (var ct in CT_Order)
                         {
-                            Console.WriteLine($"? Restoring {ct} channels...");
-                            foreach (var record in allChannels.TakeWhile(xx => xx.type == ct))
+#warning you piece of shit, things are deser'd properly why are you not taking
+                            var selc = allChannels.Where(xx => xx.type == ct);
+                            Console.WriteLine($"? Restoring {ct} channels... ({selc.Count()})");
+                            foreach (var record in selc)
                             {
                                 if (!guild.Channels.Any(ch => ch.Id == record.nativeid))
                                 {
                                     Console.WriteLine($"Channel {record.name} : {record.internalID} (previously {record.nativeid}) not found. Queueing up recreation");
-                                    restoreChannelTasks.Add((record,
+
+                                    (channelRecord, Task) rtask = (record,
                                         record.type switch
                                         {
-                                        //todo: threads and category alignment
+                                            //todo: threads and category alignment
                                             ChannelType.Voice => guild.CreateVoiceChannelAsync(record.name, ch =>
                                             {
-                                            //ch.PermissionOverwrites = record.permOverwrites;
+                                                //ch.PermissionOverwrites = record.permOverwrites;
                                                 ch.CategoryId = record.parentNativeID;
                                                 ch.Position = record.position is null or 0
                                                 ? new()
                                                 : new(record.position.Value);
                                             },
                                             rqp),
-                                            (ChannelType.PrivateThread or ChannelType.PublicThread) when guild.GetChannel(record.parentNativeID ?? default) is SocketTextChannel tc 
+                                            (ChannelType.PrivateThread or ChannelType.PublicThread) when guild.GetChannel(record.parentNativeID ?? default) is SocketTextChannel tc
                                             => tc.CreateThreadAsync(
                                                 name: record.name,
                                                 type: record.type is ChannelType.PublicThread ? ThreadType.PublicThread : ThreadType.PrivateThread,
                                                 options: rqp),
                                             ChannelType.Category => guild.CreateCategoryChannelAsync(record.name, ch =>
                                             {
-                                            //ch.PermissionOverwrites = record.permOverwrites;
+                                                //ch.PermissionOverwrites = record.permOverwrites;
                                                 ch.Position = record.position is null or 0
                                                 ? new()
                                                 : new(record.position.Value);
@@ -331,9 +333,9 @@ namespace MeatForward
                                             rqp),
                                             ChannelType.Text or _ => guild.CreateTextChannelAsync(record.name, ch =>
                                             {
-                                            //ch.PermissionOverwrites = record.permOverwrites;
-                                                ch.Topic = record.topic;
-
+#warning setting channel topic causes a ghost nullref error
+                                                //ch.Topic = record.topic;
+                                                
                                                 ch.CategoryId = record.parentNativeID;
                                                 ch.IsNsfw = record.isNsfw;
                                                 ch.SlowModeInterval = record.slowModeInterval is 0 or null
@@ -344,7 +346,9 @@ namespace MeatForward
                                                 : new(record.position.Value);
                                             },
                                             rqp)
-                                        }));
+                                        });
+                                    Debug.WriteLine($"restoration: ({rtask.Item1},{rtask.Item2})");
+                                    restoreChannelTasks.Add(rtask);
                                 }
                             }
 
@@ -356,6 +360,7 @@ namespace MeatForward
                                     var ct_text = t as Task<RestTextChannel>;
                                     var ct_voice = t as Task<RestVoiceChannel>;
                                     var ct_cat = t as Task<RestCategoryChannel>;
+                                    //todo: thread recreation error 10003 unknown channel
                                     var ct_thr = t as Task<SocketThreadChannel>;
                                     IChannel? result = ct_text?.Result ?? ct_voice?.Result ?? ct_cat?.Result ?? ct_thr?.Result as IChannel;
                                     if (result is null)
@@ -436,14 +441,12 @@ namespace MeatForward
                         {
                             var channel = guild.Channels.FirstOrDefault(rl => rl.Id == record.nativeid);
                             if (channel is null) continue;
-                            if (!channel.getRecord().Equals(record))
+                            if (!channel.getRecord().fetchAdditionalData(_cSnap).Equals(record))
                             {
-                                Console.WriteLine($"Overwrites for {channel.Name} ({channel.Id}) don't match! updating to {Newtonsoft.Json.JsonConvert.SerializeObject(record.permOverwrites.Select(seld))}");
+                                Console.WriteLine($"Overwrites for {channel.Name} ({channel.Id}) don't match! updating");
                                 restoreChannelPermTasks.Add((record, channel.ModifyAsync(ch =>
                                 {
                                     ch.PermissionOverwrites = new Optional<IEnumerable<Overwrite>>(record.permOverwrites);
-                                    
-                                    //Console.WriteLine($"SCROM : {record.name}, {Newtonsoft.Json.JsonConvert.SerializeObject(ch.PermissionOverwrites.Value.Select(seld))}");
                                 },
                                 rqp)));
                             }
@@ -466,40 +469,60 @@ namespace MeatForward
                     }
                     break;
                 case "open":
-                    if (_cSnap is not null)
                     {
-                        Console.WriteLine("There is a snapshot already opened! ");
+                        if (_cSnap is not null)
+                        {
+                            Console.WriteLine("There is a snapshot already opened! ");
+                            break;
+                        }
+                        var name = cPromptAny("Enter snapshot address: >");
+                        try
+                        {
+                            _cSnap = new SnapshotData(name, null);
+                        }
+                        catch (Exception e)
+                        {
+                            Console.WriteLine("GENERAL LOAD ERROR: " + e);
+                        }
                         break;
                     }
-                    var name = cPromptAny("Enter snapshot address: >");
-                    try
-                    {
-                        _cSnap = new SnapshotData(name, null);
-                    }
-                    catch (Exception e)
-                    {
-                        Console.WriteLine("GENERAL LOAD ERROR: " + e);
-                    }
-                    break;
                 case "close":
-                    _cSnap?.Save();
-                    _cSnap = null;
-                    break;
+                    {
+                        _cSnap?.Save();
+                        _cSnap = null;
+                        break;
+                    }
                 case "props":
-                    if (_cSnap is null) break;
-                    props = new(cPromptAny("Comment: >"), _cSnap.props.creationDate, cPromptFlags<SnapshotMode>("Select mode"), _cSnap.props.guildID);
-                    _cSnap.props = props;
-                    _cSnap.Save();
-                    break;
+                    {
+                        if (_cSnap is null) break;
+                        props = new(cPromptAny("Comment: >"), _cSnap.props.creationDate, cPromptFlags<SnapshotMode>("Select mode"), _cSnap.props.guildID);
+                        _cSnap.props = props;
+                        _cSnap.Save();
+                        break;
+                    }
                 case "backup":
-                    if (_cSnap is null) { Console.WriteLine("No snapshot!"); break; }
+                    {
+                        if (_cSnap is null) { Console.WriteLine("No snapshot!"); break; }
+                        var dest = cPromptAny("Select destination: >");
+                        if (Directory.Exists(dest)) { Console.WriteLine("Destination occupied!"); break; }
+                        var bu = _cSnap.makeBackup(dest);
+                        Console.WriteLine(bu is null ? "Couldn't create backup!" : $"Backup created: {bu}");
+                        break;
+                    }
+                case "testeq":
+                    {
+                        if (_cSnap is null) break;
+                        guild = _client.GetGuild(_cSnap.props.guildID);
+                        if (guild is null) break;
 
-                    var dest = cPromptAny("Select destination: >");
-                    if (Directory.Exists(dest)) { Console.WriteLine("Destination occupied!"); break; }
-
-                    var bu = _cSnap.makeBackup(dest);
-                    Console.WriteLine(bu is null ? "Couldn't create backup!" : $"Backup created: {bu}");
-                    break;
+                        var selected = cPrompt("Select channel", guild.Channels.ToArray(), true).getRecord();
+                        var iid = _cSnap.getEntityInternalID(selected.nativeid, DB_Channels);
+                        if (iid is null) return;
+                        var cRec = _cSnap.GetChannelData(iid.Value);
+                        Console.WriteLine(cRec.Equals(selected));
+                        Console.WriteLine(Newtonsoft.Json.JsonConvert.SerializeObject(cRec, Newtonsoft.Json.Formatting.Indented));
+                        break;
+                    }
                 case "exit":
                     break;
                 default:

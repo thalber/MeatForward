@@ -11,6 +11,7 @@ namespace MeatForward
     //#error figure out if nullables work right (please god i hope they work right)
     //todo: readd filtering
     //todo: inefficient use of IO, revise
+    //todo: switch existence checks to counts instead of single row requests?
     internal partial class SnapshotData
     {
         #region table headers
@@ -594,7 +595,7 @@ namespace MeatForward
                     sb.Append($"({userID}, {rta}), ");
                 }
                 sb.Length -= 2;
-                sb.Append($"; -- {remaining}");
+                sb.Append($";");
                 cmd0.CommandText = sb.ToString();
                 System.Diagnostics.Debug.WriteLine(cmd0.CommandText);
                 Console.WriteLine($"Added roles for {userID} : {cmd0.ExecuteNonQuery()}");

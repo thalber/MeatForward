@@ -77,11 +77,11 @@ namespace MeatForward
                 //    return Task.CompletedTask;
                 //};
                 _client.Ready += async () => {
-                    foreach (var g in _client.Guilds)
-                    {
-                        Console.WriteLine($"{g.Name}, {g.Id}, {g.Channels.Count}");
-                        foreach (var c in g.Channels) Console.WriteLine($"{c.Name}, {c.Id}, {c.GetChannelType()}");
-                    }
+                    //foreach (var g in _client.Guilds)
+                    //{
+                    //    Console.WriteLine($"{g.Name}, {g.Id}, {g.Channels.Count}");
+                    //    foreach (var c in g.Channels) Console.WriteLine($"{c.Name}, {c.Id}, {c.GetChannelType()}");
+                    //}
                     //_is = new(_client);
                     _ = Task.Run(RunMainLoop);
                 };
@@ -318,7 +318,7 @@ namespace MeatForward
                                                 : new(record.position.Value);
                                             },
                                             rqp),
-                                            (ChannelType.PrivateThread or ChannelType.PublicThread) when guild.GetChannel(record.parentNativeID ?? default) is SocketTextChannel tc
+                                            ChannelType.PrivateThread or ChannelType.PublicThread when guild.GetChannel(record.parentNativeID ?? default) is SocketTextChannel tc
                                             => tc.CreateThreadAsync(
                                                 name: record.name,
                                                 type: record.type is ChannelType.PublicThread ? ThreadType.PublicThread : ThreadType.PrivateThread,
@@ -360,7 +360,7 @@ namespace MeatForward
                                     var ct_text = t as Task<RestTextChannel>;
                                     var ct_voice = t as Task<RestVoiceChannel>;
                                     var ct_cat = t as Task<RestCategoryChannel>;
-                                    //todo: thread recreation error 10003 unknown channel
+                                    //todo: thread recreation error 10003 unknown channel (still inconsistent)
                                     var ct_thr = t as Task<SocketThreadChannel>;
                                     IChannel? result = ct_text?.Result ?? ct_voice?.Result ?? ct_cat?.Result ?? ct_thr?.Result as IChannel;
                                     if (result is null)
